@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model PoultryHouse {
+  id          Int            @id @default(autoincrement())
+  name        String
+  birdsPlaced Int
+  createdAt   DateTime       @default(now())
+  dailyRecords DailyRecord[]
+
+  @@map("poultry_houses")
+}
+
+model DailyRecord {
+  id            Int          @id @default(autoincrement())
+  houseId       Int
+  date          DateTime
+  mortality     Int          @default(0)
+  feedUsedKg    Float        @default(0)
+  eggsCollected Int          @default(0)
+  createdAt     DateTime     @default(now())
+
+  house         PoultryHouse @relation(fields: [houseId], references: [id], onDelete: Cascade)
+
+  @@map("daily_records")
+}
