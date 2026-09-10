@@ -292,6 +292,8 @@ useEffect(() => {
           <>
             <section className="welcome">
               <div>
+                <span className="section-eyebrow">Poultry House</span>
+
                 <h2>{selectedHouse.name}</h2>
 
                 <p>
@@ -439,12 +441,16 @@ useEffect(() => {
                         <td>
                           {new Date(
                             record.date
-                          ).toLocaleDateString()}
+                          ).toLocaleDateString(undefined, {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                          })}
                         </td>
 
                         <td>{record.mortality}</td>
 
-                        <td>{record.feedUsedKg} kg</td>
+                        <td>{Number(record.feedUsedKg).toFixed(1)} kg</td>
 
                         <td>{record.eggsCollected}</td>
 
@@ -489,6 +495,17 @@ useEffect(() => {
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              <div className="records-footer">
+                <span>
+                  Showing {records.length}{" "}
+                  {records.length === 1 ? "record" : "records"}
+                </span>
+
+                <span>
+                  {selectedHouse.birdsPlaced} birds initially placed
+                </span>
               </div>
             </section>
           </>

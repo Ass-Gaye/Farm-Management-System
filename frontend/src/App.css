@@ -67,6 +67,16 @@
   margin-bottom: 28px;
 }
 
+.section-eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  color: #237a45;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .welcome h2 {
   margin: 0 0 6px;
   font-size: 28px;
@@ -111,6 +121,14 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(23, 33, 27, 0.06);
 }
 
 .stat-label {
@@ -166,9 +184,21 @@ table {
 th,
 td {
   text-align: left;
-  padding: 16px 22px;
+  padding: 15px 22px;
   border-bottom: 1px solid #edf0ee;
   font-size: 14px;
+}
+
+tbody tr {
+  transition: background 0.15s ease;
+}
+
+tbody tr:hover {
+  background: #fafcfb;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
 }
 
 th {
@@ -185,6 +215,17 @@ td {
   text-align: center;
   color: #89948e;
   padding: 40px;
+}
+
+.records-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 22px;
+  background: #fafbfa;
+  border-top: 1px solid #e5e9e6;
+  color: #718078;
+  font-size: 12px;
 }
 
 /* Messages */
@@ -286,6 +327,11 @@ td {
 
   .stats-grid {
     grid-template-columns: 1fr;
+  }
+
+  .records-footer {
+    flex-direction: column;
+    gap: 6px;
   }
 
   .primary-button {

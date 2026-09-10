@@ -1,3 +1,9 @@
+/**
+ * Active request-body schemas for the API.
+ *
+ * Keeping these rules separate from controllers lets every route apply the
+ * same input contract before database work begins.
+ */
 const { z } = require("zod");
 
 const createHouseSchema = z.object({
@@ -63,10 +69,20 @@ const updateDailyRecordSchema = z.object({
     .nonnegative("Eggs collected cannot be negative"),
 });
 
+const idParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+const houseIdParamSchema = z.object({
+  houseId: z.coerce.number().int().positive(),
+});
+
 
 
 module.exports = {
   createHouseSchema,
   createDailyRecordSchema,
   updateDailyRecordSchema,
+  idParamSchema,
+  houseIdParamSchema,
 };

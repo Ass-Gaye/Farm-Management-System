@@ -1,5 +1,14 @@
 const prisma = require("../lib/prisma");
 
+/**
+ * Loads a house and aggregates its daily production statistics.
+ *
+ * currentBirds is derived from the initial bird count minus total mortality.
+ * Returning null for a missing house lets the controller choose the HTTP 404.
+ *
+ * @param {string|number} houseId House identifier from the route
+ * @returns {Promise<object|null>} Dashboard data or null when not found
+ */
 const getHouseDashboard = async (houseId) => {
   const house = await prisma.poultryHouse.findUnique({
     where: {

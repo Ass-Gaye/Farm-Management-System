@@ -1,5 +1,13 @@
 const { getHouseDashboard } = require("../services/dashboard.service");
 
+/**
+ * Returns dashboard statistics for a house.
+ *
+ * @param {import("express").Request} req Request containing houseId
+ * @param {import("express").Response} res Express response
+ * @param {import("express").NextFunction} next Error pipeline callback
+ * @returns {Promise<void>}
+ */
 const getDashboard = async (req, res, next) => {
 
   try {

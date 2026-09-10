@@ -26,8 +26,10 @@ model DailyRecord {
   eggsCollected Int          @default(0)
   createdAt     DateTime     @default(now())
 
+  // A house deletion removes its dependent production history.
   house         PoultryHouse @relation(fields: [houseId], references: [id], onDelete: Cascade)
 
+  // The API treats one record per house and date as the daily grain.
   @@unique([houseId, date])
   @@map("daily_records")
 

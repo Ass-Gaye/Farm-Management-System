@@ -1,10 +1,10 @@
 # Farm Management System
 
-A small poultry farm management system with a React/Vite frontend and an Express API backed by PostgreSQL and Prisma.
+A poultry farm management system with a React/Vite dashboard and an Express API backed by PostgreSQL and Prisma.
 
 ## Project Status
 
-The backend foundation is implemented and provides poultry-house, daily-record, dashboard, and health-check endpoints. The frontend currently contains the Vite starter interface and is ready to be connected to the API in a later iteration.
+The backend provides poultry-house, daily-record, dashboard, and health-check endpoints. The frontend is connected to the API and provides house selection, dashboard statistics, forms, daily-record management, loading states, and confirmation dialogs.
 
 ## Features
 
@@ -14,6 +14,8 @@ The backend foundation is implemented and provides poultry-house, daily-record, 
 - Calculate dashboard totals for current birds, mortality, feed used, and eggs collected.
 - Run the backend against PostgreSQL through Prisma migrations.
 - Develop the frontend with Vite hot module replacement.
+- Validate request bodies with reusable Zod schemas.
+- Enforce mortality, uniqueness, and cascade-deletion rules.
 
 ## Architecture
 
@@ -33,8 +35,17 @@ The backend foundation is implemented and provides poultry-house, daily-record, 
 |-- frontend/
 |   `-- src/
 |       |-- App.jsx
-|       |-- App.css
+|       |-- components/
+|       |-- services/api.js
 |       `-- main.jsx
+|-- docs/
+|   |-- architecture.md
+|   |-- api.md
+|   |-- codebase-map.md
+|   |-- request-flow.md
+|   |-- environment.md
+|   `-- adding-features.md
+|-- CONTRIBUTING.md
 `-- README.md
 ```
 
@@ -61,11 +72,13 @@ npm install
 
 ### Configure the database
 
-Create a PostgreSQL database, then create `backend/.env` with a Prisma connection string:
+Create a PostgreSQL database, copy `backend/.env.example` to `backend/.env`, and replace the database placeholders:
 
 ```env
 DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/farm_management?schema=public"
 PORT=5000
+NODE_ENV=development
+CORS_ORIGIN=http://localhost:5173
 ```
 
 Replace `USER`, `PASSWORD`, host, port, and database name with the values for your local PostgreSQL installation. Do not commit `.env`; environment files are ignored by Git.
@@ -99,6 +112,8 @@ npm run dev
 ```
 
 Vite prints the local frontend URL, normally `http://localhost:5173`.
+
+For a production server process, run `npm start` from `backend/`. Set `NODE_ENV=production` and configure `CORS_ORIGIN` before deployment. The backend also supports `npm run dev` for local development.
 
 ## API Reference
 
@@ -150,10 +165,12 @@ GET /api/houses/:id
 
 ### Daily records
 
-Create a record for a house:
+Daily records use flat routes under `/api/daily-records`.
+
+Create a record:
 
 ```http
-POST /api/houses/:houseId/records
+POST /api/daily-records
 Content-Type: application/json
 ```
 
@@ -168,13 +185,15 @@ Request body:
 }
 ```
 
-List records for a house:
+List all records:
 
 ```http
-GET /api/houses/:houseId/records
+GET /api/daily-records
 ```
 
-Records are returned newest first. A missing house returns `404` with `Poultry house not found`.
+Records are returned newest first and include their related house. The frontend filters this global list for the selected house.
+
+Get, update, or delete one record with `GET`, `PUT`, or `DELETE /api/daily-records/:id`.
 
 ### House dashboard
 
@@ -251,10 +270,19 @@ npm run preview             # Preview the production build
 
 ## Current Limitations
 
-- The frontend does not yet fetch or display data from the backend.
-- The API currently relies on request payloads being correctly typed and does not expose authentication or authorization.
-- Backend tests have not been added yet; the backend package currently has a placeholder test script.
-- The frontend has no separate production API URL configuration yet.
+- The API currently has no authentication or authorization.
+- The frontend API URL is configurable with `VITE_API_URL` but defaults to `http://localhost:5000/api`.
+- Daily records are fetched globally and filtered in the frontend.
+
+## Further Documentation
+
+- [Architecture](docs/architecture.md): actual layers, request lifecycle, and design rationale.
+- [API reference](docs/api.md): every current endpoint, body, rule, and response.
+- [Codebase map](docs/codebase-map.md): file responsibilities and dependencies.
+- [Request flow](docs/request-flow.md): a concrete `POST /api/houses` walkthrough.
+- [Environment](docs/environment.md): configuration without secrets.
+- [Adding features](docs/adding-features.md): step-by-step development guide.
+- [Contributing](CONTRIBUTING.md): workflow, conventions, and verification.
 
 ## License
 

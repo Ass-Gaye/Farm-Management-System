@@ -1,3 +1,9 @@
+/**
+ * Poultry-house API routes.
+ *
+ * Routes keep HTTP method/path wiring and request-body validation separate
+ * from the controller operations.
+ */
 const express = require("express");
 
 const {
@@ -8,10 +14,11 @@ const {
   deleteHouse,
 } = require("../controllers/house.controller");
 
-const validate = require("../middleware/validate");
+const { validate, validateParams } = require("../middleware/validate");
 
 const {
   createHouseSchema,
+  idParamSchema,
 } = require("../middleware/validation.schemas");
 
 const router = express.Router();
@@ -24,14 +31,15 @@ router.post(
 
 router.get("/", getHouses);
 
-router.get("/:id", getHouseById);
+router.get("/:id", validateParams(idParamSchema), getHouseById);
 
 router.put(
   "/:id",
   validate(createHouseSchema),
+  validateParams(idParamSchema),
   updateHouse
 );
 
-router.delete("/:id", deleteHouse);
+router.delete("/:id", validateParams(idParamSchema), deleteHouse);
 
 module.exports = router;

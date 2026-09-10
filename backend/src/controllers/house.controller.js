@@ -1,5 +1,13 @@
 const prisma = require("../lib/prisma");
 
+/**
+ * Creates a poultry house from validated request data.
+ *
+ * @param {import("express").Request} req Request containing house fields
+ * @param {import("express").Response} res Express response
+ * @param {import("express").NextFunction} next Error pipeline callback
+ * @returns {Promise<void>}
+ */
 const createHouse = async (req, res, next) => {
   try {
     const { name, birdsPlaced, createdAt } = req.body;
@@ -24,6 +32,14 @@ const createHouse = async (req, res, next) => {
 
 };
 
+/**
+ * Retrieves all houses, newest by creation date first.
+ *
+ * @param {import("express").Request} req Express request
+ * @param {import("express").Response} res Express response
+ * @param {import("express").NextFunction} next Error pipeline callback
+ * @returns {Promise<void>}
+ */
 const getHouses = async (req, res, next) => {
   try {
     const houses = await prisma.poultryHouse.findMany({
@@ -43,6 +59,14 @@ const getHouses = async (req, res, next) => {
 
 };
 
+/**
+ * Retrieves one house and its daily records.
+ *
+ * @param {import("express").Request} req Request containing the house ID
+ * @param {import("express").Response} res Express response
+ * @param {import("express").NextFunction} next Error pipeline callback
+ * @returns {Promise<void>}
+ */
 const getHouseById = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -80,6 +104,15 @@ const getHouseById = async (req, res, next) => {
 
 };
 
+/**
+ * Updates a house while preventing its initial bird count from dropping
+ * below accumulated mortality.
+ *
+ * @param {import("express").Request} req Request containing ID and house data
+ * @param {import("express").Response} res Express response
+ * @param {import("express").NextFunction} next Error pipeline callback
+ * @returns {Promise<void>}
+ */
 const updateHouse = async (req, res, next) => {
 
   try {
@@ -147,6 +180,14 @@ const updateHouse = async (req, res, next) => {
   
 };
 
+/**
+ * Deletes a house; the database relation cascades its daily records.
+ *
+ * @param {import("express").Request} req Request containing the house ID
+ * @param {import("express").Response} res Express response
+ * @param {import("express").NextFunction} next Error pipeline callback
+ * @returns {Promise<void>}
+ */
 const deleteHouse = async (req, res, next) => {
   try {
     const { id } = req.params;
