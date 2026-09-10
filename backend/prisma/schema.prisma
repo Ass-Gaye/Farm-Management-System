@@ -28,5 +28,7 @@ model DailyRecord {
 
   house         PoultryHouse @relation(fields: [houseId], references: [id], onDelete: Cascade)
 
+  @@unique([houseId, date])
   @@map("daily_records")
+
 }

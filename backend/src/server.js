@@ -2,6 +2,8 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
+const errorMiddleware = require("./middleware/error.middleware");
+
 const houseRoutes = require("./routes/house.routes");
 const dailyRecordRoutes = require("./routes/dailyRecord.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
@@ -19,8 +21,10 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/houses", houseRoutes);
-app.use("/api/houses/:houseId/records", dailyRecordRoutes);
+app.use("/api/daily-records", dailyRecordRoutes);
 app.use("/api/houses/:houseId/dashboard", dashboardRoutes);
+
+app.use(errorMiddleware);
 
 const PORT = process.env.PORT || 5000;
 
