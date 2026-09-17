@@ -1,9 +1,9 @@
 const prisma = require("../lib/prisma");
 
 /**
- * Creates a poultry house from validated request data.
+ * Creates a poultry house associated with the authenticated user.
  *
- * @param {import("express").Request} req Request containing house fields
+ * @param {import("express").Request} req Request containing house fields and req.user
  * @param {import("express").Response} res Express response
  * @param {import("express").NextFunction} next Error pipeline callback
  * @returns {Promise<void>}
@@ -14,6 +14,7 @@ const createHouse = async (req, res, next) => {
 
     const house = await prisma.poultryHouse.create({
       data: {
+        userId: req.user.id,
         name,
         birdsPlaced,
         createdAt,
@@ -25,15 +26,13 @@ const createHouse = async (req, res, next) => {
       message: "Poultry house created successfully",
       data: house,
     });
-
   } catch (error) {
     next(error);
   }
-
 };
 
 /**
- * Retrieves all houses, newest by creation date first.
+ * Retrieves all poultry houses belonging to the authenticated user.
  *
  * @param {import("express").Request} req Express request
  * @param {import("express").Response} res Express response
@@ -43,6 +42,9 @@ const createHouse = async (req, res, next) => {
 const getHouses = async (req, res, next) => {
   try {
     const houses = await prisma.poultryHouse.findMany({
+      where: {
+        userId: req.user.id,
+      },
       orderBy: {
         createdAt: "desc",
       },
@@ -52,17 +54,15 @@ const getHouses = async (req, res, next) => {
       success: true,
       data: houses,
     });
-
   } catch (error) {
     next(error);
   }
-
 };
 
 /**
- * Retrieves one house and its daily records.
+ * Retrieves one poultry house and its relations, verifying ownership.
  *
- * @param {import("express").Request} req Request containing the house ID
+ * @param {import("express").Request} req Request containing house ID
  * @param {import("express").Response} res Express response
  * @param {import("express").NextFunction} next Error pipeline callback
  * @returns {Promise<void>}
@@ -71,19 +71,39 @@ const getHouseById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const house = await prisma.poultryHouse.findUnique({
+    const house = await prisma.poultryHouse.findFirst({
       where: {
         id: Number(id),
+        userId: req.user.id,
       },
-
       include: {
         dailyRecords: {
           orderBy: {
             date: "desc",
           },
         },
+        breeds: {
+          orderBy: {
+            createdAt: "desc",
+          },
+        },
+        birdConditions: {
+          include: {
+            breed: true,
+          },
+          orderBy: {
+            recordDate: "desc",
+          },
+        },
+        slaughterPlans: {
+          include: {
+            breed: true,
+          },
+          orderBy: {
+            expectedSlaughterDate: "asc",
+          },
+        },
       },
-
     });
 
     if (!house) {
@@ -97,16 +117,14 @@ const getHouseById = async (req, res, next) => {
       success: true,
       data: house,
     });
-
   } catch (error) {
     next(error);
   }
-
 };
 
 /**
- * Updates a house while preventing its initial bird count from dropping
- * below accumulated mortality.
+ * Updates a poultry house while preventing its bird count from dropping
+ * below accumulated mortality, strictly enforcing user ownership.
  *
  * @param {import("express").Request} req Request containing ID and house data
  * @param {import("express").Response} res Express response
@@ -114,23 +132,19 @@ const getHouseById = async (req, res, next) => {
  * @returns {Promise<void>}
  */
 const updateHouse = async (req, res, next) => {
-
   try {
-
     const { id } = req.params;
     const { name, birdsPlaced, createdAt } = req.body;
 
-    const existingHouse = await prisma.poultryHouse.findUnique({
+    const existingHouse = await prisma.poultryHouse.findFirst({
       where: {
         id: Number(id),
+        userId: req.user.id,
       },
-
       include: {
         dailyRecords: true,
       },
-
     });
-
 
     if (!existingHouse) {
       return res.status(404).json({
@@ -139,12 +153,10 @@ const updateHouse = async (req, res, next) => {
       });
     }
 
-
     const totalMortality = existingHouse.dailyRecords.reduce(
       (total, record) => total + record.mortality,
       0
     );
-
 
     if (birdsPlaced < totalMortality) {
       return res.status(400).json({
@@ -153,35 +165,30 @@ const updateHouse = async (req, res, next) => {
       });
     }
 
-
     const house = await prisma.poultryHouse.update({
       where: {
         id: Number(id),
       },
-
       data: {
         name,
         birdsPlaced,
         createdAt,
       },
-
     });
-
 
     res.json({
       success: true,
       message: "Poultry house updated successfully",
       data: house,
     });
-
   } catch (error) {
     next(error);
   }
-  
 };
 
 /**
- * Deletes a house; the database relation cascades its daily records.
+ * Deletes a poultry house belonging to the authenticated user.
+ * The database relation cascades daily records, breeds, conditions, and slaughter plans.
  *
  * @param {import("express").Request} req Request containing the house ID
  * @param {import("express").Response} res Express response
@@ -192,9 +199,10 @@ const deleteHouse = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const existingHouse = await prisma.poultryHouse.findUnique({
+    const existingHouse = await prisma.poultryHouse.findFirst({
       where: {
         id: Number(id),
+        userId: req.user.id,
       },
     });
 
@@ -215,11 +223,9 @@ const deleteHouse = async (req, res, next) => {
       success: true,
       message: "Poultry house deleted successfully",
     });
-
   } catch (error) {
     next(error);
   }
-
 };
 
 module.exports = {

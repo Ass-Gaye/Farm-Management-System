@@ -14,6 +14,7 @@ const {
   deleteDailyRecord,
 } = require("../controllers/dailyRecord.controller");
 
+const { authenticate } = require("../middleware/auth.middleware");
 const { validate, validateParams } = require("../middleware/validate");
 
 const {
@@ -23,6 +24,8 @@ const {
 } = require("../middleware/validation.schemas");
 
 const router = express.Router();
+
+router.use(authenticate);
 
 router.post(
   "/",

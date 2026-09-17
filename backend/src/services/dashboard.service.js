@@ -1,38 +1,59 @@
 const prisma = require("../lib/prisma");
+const { computeSlaughterStatus } = require("../controllers/slaughterPlan.controller");
 
 /**
- * Loads a house and aggregates its daily production statistics.
- *
- * currentBirds is derived from the initial bird count minus total mortality.
- * Returning null for a missing house lets the controller choose the HTTP 404.
+ * Loads a house belonging to the user and aggregates production, breed, health,
+ * and slaughter planning statistics.
  *
  * @param {string|number} houseId House identifier from the route
+ * @param {number} userId User identifier of the authenticated requester
  * @returns {Promise<object|null>} Dashboard data or null when not found
  */
-const getHouseDashboard = async (houseId) => {
-  const house = await prisma.poultryHouse.findUnique({
+const getHouseDashboard = async (houseId, userId) => {
+  const house = await prisma.poultryHouse.findFirst({
     where: {
       id: Number(houseId),
+      ...(userId ? { userId } : {}),
     },
-
     include: {
-      dailyRecords: true,
+      dailyRecords: {
+        orderBy: {
+          date: "desc",
+        },
+      },
+      breeds: {
+        orderBy: {
+          createdAt: "desc",
+        },
+      },
+      birdConditions: {
+        include: {
+          breed: true,
+        },
+        orderBy: {
+          recordDate: "desc",
+        },
+      },
+      slaughterPlans: {
+        include: {
+          breed: true,
+        },
+        orderBy: {
+          expectedSlaughterDate: "asc",
+        },
+      },
     },
-
   });
-
 
   if (!house) {
     return null;
   }
 
-
-
+  // Daily records aggregations
   const totalMortality = house.dailyRecords.reduce(
     (total, record) => total + record.mortality,
     0
   );
-
 
   const totalFeedUsed = house.dailyRecords.reduce(
     (total, record) => total + record.feedUsedKg,
@@ -46,6 +67,65 @@ const getHouseDashboard = async (houseId) => {
 
   const currentBirds = house.birdsPlaced - totalMortality;
 
+  // Breeds aggregations
+  const totalBreeds = house.breeds.length;
+  const totalBreedBirds = house.breeds.reduce(
+    (total, breed) => total + breed.numberOfBirds,
+    0
+  );
+
+  // Health / condition summary from all records or latest
+  const healthSummary = house.birdConditions.reduce(
+    (acc, record) => {
+      acc.healthy += record.healthy;
+      acc.sick += record.sick;
+      acc.weak += record.weak;
+      acc.underObservation += record.underObservation;
+      acc.totalRecorded +=
+        record.healthy + record.sick + record.weak + record.underObservation;
+      return acc;
+    },
+    { healthy: 0, sick: 0, weak: 0, underObservation: 0, totalRecorded: 0 }
+  );
+
+  // Slaughter planning summary
+  const enrichedPlans = house.slaughterPlans.map((plan) => ({
+    ...plan,
+    computedStatus: computeSlaughterStatus(plan),
+  }));
+
+  const slaughterSummary = enrichedPlans.reduce(
+    (acc, plan) => {
+      acc.totalBirdsPlanned += plan.numberOfBirds;
+      switch (plan.computedStatus) {
+        case "Completed":
+          acc.completed += 1;
+          break;
+        case "Overdue":
+          acc.overdue += 1;
+          break;
+        case "Due today":
+          acc.dueToday += 1;
+          break;
+        case "Due soon":
+          acc.dueSoon += 1;
+          break;
+        case "Upcoming":
+        default:
+          acc.upcoming += 1;
+          break;
+      }
+      return acc;
+    },
+    {
+      totalBirdsPlanned: 0,
+      upcoming: 0,
+      dueSoon: 0,
+      dueToday: 0,
+      overdue: 0,
+      completed: 0,
+    }
+  );
 
   return {
     house: {
@@ -59,20 +139,16 @@ const getHouseDashboard = async (houseId) => {
       totalMortality,
       totalFeedUsed,
       totalEggsCollected,
+      totalBreeds,
+      totalBreedBirds,
+      healthSummary,
+      slaughterSummary,
     },
+    recentConditions: house.birdConditions.slice(0, 5),
+    upcomingSlaughter: enrichedPlans.filter((p) => p.computedStatus !== "Completed").slice(0, 5),
   };
-
-
 };
 
 module.exports = {
   getHouseDashboard,
 };
-
-
-// an expalanation of the code is that it defines a function `getHouseDashboard`
-// that retrieves information about a specific poultry house
-//  from a database using Prisma. It calculates various statistics such as total mortality,
-//  total feed used, total eggs collected, and the current number of birds in the house.
-//  The function returns an object containing the house details and the calculated statistics.
-//  If the house is not found, it returns null. The function is then exported for use in other parts of the application.

@@ -15,24 +15,24 @@ const runSerializable = async (operation) => {
 };
 
 /**
- * Creates a daily record after checking the house and available birds.
+ * Creates a daily record after checking that the house belongs to the user and
+ * mortality does not exceed available birds.
  *
- * @param {import("express").Request} req Request containing record data
+ * @param {import("express").Request} req Request containing record data and req.user
  * @param {import("express").Response} res Express response
  * @param {import("express").NextFunction} next Error pipeline callback
  * @returns {Promise<void>}
  */
 const createDailyRecord = async (req, res, next) => {
-
   try {
-
     const { houseId } = req.body;
     const { date, mortality, feedUsedKg, eggsCollected } = req.body;
 
     const dailyRecord = await runSerializable(async (transaction) => {
-      const house = await transaction.poultryHouse.findUnique({
+      const house = await transaction.poultryHouse.findFirst({
         where: {
           id: Number(houseId),
+          userId: req.user.id,
         },
         include: {
           dailyRecords: true,
@@ -76,7 +76,6 @@ const createDailyRecord = async (req, res, next) => {
       message: "Daily record created successfully",
       data: dailyRecord,
     });
-
   } catch (error) {
     if (error.code === "HOUSE_NOT_FOUND") {
       return res.status(404).json({
@@ -108,11 +107,10 @@ const createDailyRecord = async (req, res, next) => {
 
     next(error);
   }
-
 };
 
 /**
- * Retrieves all daily records with their related house, newest first.
+ * Retrieves all daily records for houses owned by the authenticated user, newest first.
  *
  * @param {import("express").Request} req Express request
  * @param {import("express").Response} res Express response
@@ -120,10 +118,21 @@ const createDailyRecord = async (req, res, next) => {
  * @returns {Promise<void>}
  */
 const getDailyRecords = async (req, res, next) => {
-
   try {
+    const { houseId } = req.query;
+
+    const whereClause = {
+      house: {
+        userId: req.user.id,
+      },
+    };
+
+    if (houseId) {
+      whereClause.houseId = Number(houseId);
+    }
 
     const records = await prisma.dailyRecord.findMany({
+      where: whereClause,
       include: {
         house: true,
       },
@@ -136,30 +145,29 @@ const getDailyRecords = async (req, res, next) => {
       success: true,
       data: records,
     });
-
-  }
-  catch (error) {
+  } catch (error) {
     next(error);
   }
-
 };
 
 /**
- * Retrieves one daily record and its related house.
+ * Retrieves one daily record if it belongs to a house owned by the authenticated user.
  *
- * @param {import("express").Request} req Request containing the record ID
+ * @param {import("express").Request} req Request containing record ID
  * @param {import("express").Response} res Express response
  * @param {import("express").NextFunction} next Error pipeline callback
  * @returns {Promise<void>}
  */
 const getDailyRecordById = async (req, res, next) => {
-
   try {
     const { id } = req.params;
 
-    const record = await prisma.dailyRecord.findUnique({
+    const record = await prisma.dailyRecord.findFirst({
       where: {
         id: Number(id),
+        house: {
+          userId: req.user.id,
+        },
       },
       include: {
         house: true,
@@ -177,16 +185,15 @@ const getDailyRecordById = async (req, res, next) => {
       success: true,
       data: record,
     });
-
   } catch (error) {
     next(error);
   }
 };
 
 /**
- * Updates a record after checking mortality against the house's other records.
+ * Updates a daily record after verifying user ownership and checking mortality limits.
  *
- * @param {import("express").Request} req Request containing ID and record data
+ * @param {import("express").Request} req Request containing ID, record data, and req.user
  * @param {import("express").Response} res Express response
  * @param {import("express").NextFunction} next Error pipeline callback
  * @returns {Promise<void>}
@@ -197,9 +204,12 @@ const updateDailyRecord = async (req, res, next) => {
     const { date, mortality, feedUsedKg, eggsCollected } = req.body;
 
     const updatedRecord = await runSerializable(async (transaction) => {
-      const existingRecord = await transaction.dailyRecord.findUnique({
+      const existingRecord = await transaction.dailyRecord.findFirst({
         where: {
           id: Number(id),
+          house: {
+            userId: req.user.id,
+          },
         },
       });
 
@@ -209,9 +219,10 @@ const updateDailyRecord = async (req, res, next) => {
         throw error;
       }
 
-      const house = await transaction.poultryHouse.findUnique({
+      const house = await transaction.poultryHouse.findFirst({
         where: {
           id: existingRecord.houseId,
+          userId: req.user.id,
         },
         include: {
           dailyRecords: true,
@@ -250,7 +261,6 @@ const updateDailyRecord = async (req, res, next) => {
       message: "Daily record updated successfully",
       data: updatedRecord,
     });
-
   } catch (error) {
     if (error.code === "RECORD_NOT_FOUND") {
       return res.status(404).json({
@@ -282,13 +292,12 @@ const updateDailyRecord = async (req, res, next) => {
 
     next(error);
   }
-
 };
 
 /**
- * Deletes one daily record.
+ * Deletes a daily record owned by the authenticated user.
  *
- * @param {import("express").Request} req Request containing the record ID
+ * @param {import("express").Request} req Request containing record ID
  * @param {import("express").Response} res Express response
  * @param {import("express").NextFunction} next Error pipeline callback
  * @returns {Promise<void>}
@@ -297,9 +306,12 @@ const deleteDailyRecord = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const record = await prisma.dailyRecord.findUnique({
+    const record = await prisma.dailyRecord.findFirst({
       where: {
         id: Number(id),
+        house: {
+          userId: req.user.id,
+        },
       },
     });
 
@@ -320,7 +332,6 @@ const deleteDailyRecord = async (req, res, next) => {
       success: true,
       message: "Daily record deleted successfully",
     });
-
   } catch (error) {
     next(error);
   }

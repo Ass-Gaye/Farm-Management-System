@@ -3,16 +3,34 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        Int            @id @default(autoincrement())
+  email     String         @unique
+  password  String
+  name      String
+  createdAt DateTime       @default(now())
+  houses    PoultryHouse[]
+
+  @@map("users")
 }
 
 model PoultryHouse {
-  id          Int            @id @default(autoincrement())
-  name        String
-  birdsPlaced Int
-  createdAt   DateTime       @default(now())
-  dailyRecords DailyRecord[]
+  id             Int             @id @default(autoincrement())
+  userId         Int
+  name           String
+  birdsPlaced    Int
+  createdAt      DateTime        @default(now())
+  dailyRecords   DailyRecord[]
+  breeds         Breed[]
+  birdConditions BirdCondition[]
+  slaughterPlans SlaughterPlan[]
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("poultry_houses")
 }
@@ -32,5 +50,55 @@ model DailyRecord {
   // The API treats one record per house and date as the daily grain.
   @@unique([houseId, date])
   @@map("daily_records")
+}
 
+model Breed {
+  id             Int             @id @default(autoincrement())
+  houseId        Int
+  name           String
+  description    String?
+  numberOfBirds  Int
+  dateAdded      DateTime        @default(now())
+  createdAt      DateTime        @default(now())
+
+  house          PoultryHouse    @relation(fields: [houseId], references: [id], onDelete: Cascade)
+  birdConditions BirdCondition[]
+  slaughterPlans SlaughterPlan[]
+
+  @@map("breeds")
+}
+
+model BirdCondition {
+  id               Int          @id @default(autoincrement())
+  houseId          Int
+  breedId          Int?
+  healthy          Int          @default(0)
+  sick             Int          @default(0)
+  weak             Int          @default(0)
+  underObservation Int          @default(0)
+  notes            String?
+  recordDate       DateTime
+  createdAt        DateTime     @default(now())
+
+  house            PoultryHouse @relation(fields: [houseId], references: [id], onDelete: Cascade)
+  breed            Breed?       @relation(fields: [breedId], references: [id], onDelete: SetNull)
+
+  @@map("bird_conditions")
+}
+
+model SlaughterPlan {
+  id                    Int          @id @default(autoincrement())
+  houseId               Int
+  breedId               Int?
+  numberOfBirds         Int
+  placementDate         DateTime
+  expectedSlaughterDate DateTime
+  status                String       @default("Upcoming")
+  notes                 String?
+  createdAt             DateTime     @default(now())
+
+  house                 PoultryHouse @relation(fields: [houseId], references: [id], onDelete: Cascade)
+  breed                 Breed?       @relation(fields: [breedId], references: [id], onDelete: SetNull)
+
+  @@map("slaughter_plans")
 }

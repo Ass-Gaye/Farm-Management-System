@@ -6,10 +6,13 @@
 const express = require("express");
 
 const { getDashboard } = require("../controllers/dashboard.controller");
+const { authenticate } = require("../middleware/auth.middleware");
 const { validateParams } = require("../middleware/validate");
 const { houseIdParamSchema } = require("../middleware/validation.schemas");
 
 const router = express.Router({ mergeParams: true });
+
+router.use(authenticate);
 
 router.get("/", validateParams(houseIdParamSchema), getDashboard);
 
