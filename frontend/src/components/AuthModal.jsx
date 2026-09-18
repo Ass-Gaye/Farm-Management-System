@@ -65,7 +65,7 @@ function AuthModal({ onSuccess }) {
       }
       onSuccess(result.data.user);
     } catch (err) {
-      setError(err.message || "Authentication failed. Please try again.");
+      setError(err.message);
     } finally {
       setLoading(false);
     }

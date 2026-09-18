@@ -1,3 +1,5 @@
+import { AlertTriangleIcon } from "./Icons";
+
 function ConfirmDialog({
   title,
   message,
@@ -9,10 +11,12 @@ function ConfirmDialog({
 }) {
   return (
     <div className="dialog-overlay">
-      <div className="confirm-dialog">
-        <div className="dialog-icon">!</div>
+      <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+        <div className="dialog-icon">
+          <AlertTriangleIcon size={20} />
+        </div>
 
-        <h2>{title}</h2>
+        <h2 id="dialog-title">{title}</h2>
 
         <p>{message}</p>
 

@@ -115,6 +115,10 @@ export const getDailyRecords = async (houseId) => {
   return request(`/daily-records${query}`);
 };
 
+export const getDailyRecordById = async (recordId) => {
+  return request(`/daily-records/${recordId}`);
+};
+
 export const createDailyRecord = async (recordData) => {
   return request("/daily-records", {
     method: "POST",
@@ -148,6 +152,10 @@ export const getBreeds = async (houseId) => {
   return request(`/breeds${query}`);
 };
 
+export const getBreedById = async (breedId) => {
+  return request(`/breeds/${breedId}`);
+};
+
 export const createBreed = async (breedData) => {
   return request("/breeds", {
     method: "POST",
@@ -175,6 +183,10 @@ export const getBirdConditions = async (houseId) => {
   return request(`/bird-conditions${query}`);
 };
 
+export const getBirdConditionById = async (conditionId) => {
+  return request(`/bird-conditions/${conditionId}`);
+};
+
 export const createBirdCondition = async (conditionData) => {
   return request("/bird-conditions", {
     method: "POST",
@@ -200,6 +212,10 @@ export const deleteBirdCondition = async (conditionId) => {
 export const getSlaughterPlans = async (houseId) => {
   const query = houseId ? `?houseId=${houseId}` : "";
   return request(`/slaughter-plans${query}`);
+};
+
+export const getSlaughterPlanById = async (planId) => {
+  return request(`/slaughter-plans/${planId}`);
 };
 
 export const createSlaughterPlan = async (planData) => {

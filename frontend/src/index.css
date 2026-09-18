@@ -1,4 +1,74 @@
-* {
+/* ==========================================================================
+   Design Tokens & Global Base Styles
+   Grounded in Agricultural Operations & Clean High-Density UX
+   ========================================================================== */
+
+:root {
+  /* Brand / Deep Forest Green */
+  --pine-900: #13241A;
+  --pine-800: #1B3527;
+  --pine-700: #244936;
+  --pine-600: #2E5C45;
+  --pine-500: #3D7558;
+  --pine-100: #E7EFEA;
+  --pine-50:  #F2F7F4;
+
+  /* Field Accent Green */
+  --field-600: #26734D;
+  --field-500: #2D8659;
+  --field-400: #429E6F;
+  --field-100: #E6F5ED;
+  --field-50:  #F2FBF6;
+
+  /* Neutrals / Ground Surface */
+  --bg-app: #F6F8F5;
+  --bg-surface: #FFFFFF;
+  --bg-surface-subtle: #FAFBF9;
+  --bg-surface-muted: #F0F3F0;
+
+  /* Structural Rules & Borders */
+  --border-subtle: #E2E7E2;
+  --border-default: #D3DBD4;
+  --border-strong: #BAC7BC;
+
+  /* High Contrast Typography */
+  --text-primary: #15221B;
+  --text-secondary: #48594F;
+  --text-muted: #738479;
+  --text-inverse: #FFFFFF;
+
+  /* Semantic Alerts */
+  --alert-danger: #B42318;
+  --alert-danger-bg: #FEF3F2;
+  --alert-danger-border: #FECDCA;
+
+  --alert-amber: #B54708;
+  --alert-amber-bg: #FFFAEB;
+  --alert-amber-border: #FEDF89;
+
+  --alert-success: #0B7847;
+  --alert-success-bg: #EDFCF2;
+  --alert-success-border: #A6F4C5;
+
+  --alert-info: #026AA2;
+  --alert-info-bg: #F0F9FF;
+  --alert-info-border: #B9E6FE;
+
+  /* Shadows - purposeful and tight rather than generic blurry drops */
+  --shadow-sm: 0 1px 2px rgba(19, 36, 26, 0.04);
+  --shadow-md: 0 4px 12px rgba(19, 36, 26, 0.06);
+  --shadow-lg: 0 12px 28px rgba(19, 36, 26, 0.1);
+  --shadow-modal: 0 20px 48px rgba(15, 28, 20, 0.18);
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+}
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -7,21 +77,59 @@ body {
   margin: 0;
   padding: 0;
   font-family:
-    Inter,
-    system-ui,
+    "Plus Jakarta Sans",
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
+    Roboto,
     sans-serif;
-  background: #f6f8f7;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   min-width: 320px;
+  min-height: 100vh;
+}
+
+/* Tabular figures for data tables and statistics */
+.tabular-nums,
+td,
+th,
+.stat-card strong,
+.summary-item-value,
+.badge,
+.tab-badge {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Accessibility & Focus Rings */
+:focus-visible {
+  outline: 2px solid var(--field-500);
+  outline-offset: 2px;
 }
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
