@@ -607,6 +607,188 @@ test("supports full authentication, user isolation, and features lifecycle", asy
   });
   assert.equal(delInc2.status, 200);
 
+  // =========================================================================
+  // 12. PHASE 2: FARM BUSINESS FINANCE (Customers, Suppliers, Sales, Debts)
+  // =========================================================================
+
+  // 12a. Customer Management & Validation
+  const createCustRes = await request("/api/customers", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      name: "ABC Shop",
+      phone: "+220 712 3456",
+      email: "contact@abcshop.gm",
+      address: "Serrekunda Market",
+      notes: "Daily egg retail partner",
+    }),
+  });
+  assert.equal(createCustRes.status, 201);
+  assert.equal(createCustRes.body.data.name, "ABC Shop");
+  const customerId = createCustRes.body.data.id;
+
+  // Tenant isolation: User 2 cannot view or edit User 1's customer
+  const user2GetCust = await request(`/api/customers/${customerId}`, { headers: authHeaders2 });
+  assert.equal(user2GetCust.status, 404);
+
+  const user2UpdateCust = await request(`/api/customers/${customerId}`, {
+    method: "PUT",
+    headers: authHeaders2,
+    body: JSON.stringify({ name: "Hacked Customer" }),
+  });
+  assert.equal(user2UpdateCust.status, 404);
+
+  // 12b. Supplier Management & Validation
+  const createSuppRes = await request("/api/suppliers", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      name: "ABC Feed Supplier",
+      category: "Feed",
+      phone: "+220 987 6543",
+      email: "orders@abcfeed.gm",
+      address: "Kanifing Industrial Estate",
+      notes: "Weekly layer mash provider",
+    }),
+  });
+  assert.equal(createSuppRes.status, 201);
+  assert.equal(createSuppRes.body.data.name, "ABC Feed Supplier");
+  const supplierId = createSuppRes.body.data.id;
+
+  // Tenant isolation: User 2 cannot view or edit User 1's supplier
+  const user2GetSupp = await request(`/api/suppliers/${supplierId}`, { headers: authHeaders2 });
+  assert.equal(user2GetSupp.status, 404);
+
+  // 12c. Scenario 1: Detailed Egg Sale with credit / outstanding balance
+  // 20 trays x GMD 350 = GMD 7,000, Paid: GMD 5,000 -> Outstanding: GMD 2,000, Status: PARTIALLY_PAID
+  const eggSaleRes = await request("/api/income", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      customerId,
+      houseId,
+      category: "Egg sales",
+      quantity: 20,
+      unit: "trays",
+      unitPrice: 350,
+      amount: 7000,
+      amountPaid: 5000,
+      date: "2026-09-19",
+      description: "20 trays of fresh brown eggs",
+    }),
+  });
+  assert.equal(eggSaleRes.status, 201);
+  assert.equal(eggSaleRes.body.data.amount, 7000);
+  assert.equal(eggSaleRes.body.data.amountPaid, 5000);
+  assert.equal(eggSaleRes.body.data.amountDue, 2000);
+  assert.equal(eggSaleRes.body.data.paymentStatus, "PARTIALLY_PAID");
+  const eggSaleId = eggSaleRes.body.data.id;
+
+  // 12d. Scenario 2: Dedicated Bird Sale fully paid (with auto-derived amount from quantity * unitPrice)
+  // 25 birds x GMD 500 = GMD 12,500, Paid: GMD 12,500 -> Outstanding: GMD 0, Status: PAID
+  const birdSaleRes = await request("/api/income", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      customerId,
+      houseId,
+      category: "Bird sales",
+      quantity: 25,
+      unit: "birds",
+      unitPrice: 500,
+      amountPaid: 12500,
+      date: "2026-09-19",
+      description: "25 dressed broilers",
+    }),
+  });
+  assert.equal(birdSaleRes.status, 201);
+  assert.equal(birdSaleRes.body.data.amount, 12500);
+  assert.equal(birdSaleRes.body.data.amountPaid, 12500);
+  assert.equal(birdSaleRes.body.data.amountDue, 0);
+  assert.equal(birdSaleRes.body.data.paymentStatus, "PAID");
+  const birdSaleId = birdSaleRes.body.data.id;
+
+  // 12e. Scenario 3: Feed Purchase with supplier and payables owed
+  // 50 bags x GMD 1,200 = GMD 60,000, Paid: GMD 40,000 -> Outstanding: GMD 20,000, Status: PARTIALLY_PAID
+  const feedPurchaseRes = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      supplierId,
+      houseId,
+      category: "Feed",
+      quantity: 50,
+      unit: "bags",
+      unitPrice: 1200,
+      amount: 60000,
+      amountPaid: 40000,
+      date: "2026-09-19",
+      description: "50 bags layer feed",
+    }),
+  });
+  assert.equal(feedPurchaseRes.status, 201);
+  assert.equal(feedPurchaseRes.body.data.amount, 60000);
+  assert.equal(feedPurchaseRes.body.data.amountPaid, 40000);
+  assert.equal(feedPurchaseRes.body.data.amountDue, 20000);
+  assert.equal(feedPurchaseRes.body.data.paymentStatus, "PARTIALLY_PAID");
+  const feedPurchaseId = feedPurchaseRes.body.data.id;
+
+  // 12f. Customer Financial Profile Verification
+  // Total Purchases: 7,000 + 12,500 = 19,500
+  // Total Paid: 5,000 + 12,500 = 17,500
+  // Outstanding Debt: 2,000
+  const custProfileRes = await request(`/api/customers/${customerId}`, { headers: authHeaders1 });
+  assert.equal(custProfileRes.status, 200);
+  assert.equal(custProfileRes.body.data.totalPurchases, 19500);
+  assert.equal(custProfileRes.body.data.totalPaid, 17500);
+  assert.equal(custProfileRes.body.data.outstandingBalance, 2000);
+  assert.equal(custProfileRes.body.data.sales.length, 2);
+
+  // 12g. Supplier Financial Profile Verification
+  // Total Purchases: 60,000
+  // Total Paid: 40,000
+  // Outstanding Payables: 20,000
+  const suppProfileRes = await request(`/api/suppliers/${supplierId}`, { headers: authHeaders1 });
+  assert.equal(suppProfileRes.status, 200);
+  assert.equal(suppProfileRes.body.data.totalPurchases, 60000);
+  assert.equal(suppProfileRes.body.data.totalPaid, 40000);
+  assert.equal(suppProfileRes.body.data.outstandingPayables, 20000);
+  assert.equal(suppProfileRes.body.data.expenses.length, 1);
+
+  // 12h. Enhanced Financial Summary Verification (Credit & Debt Tracking)
+  const phase2Summary = await request("/api/financial-summary", { headers: authHeaders1 });
+  assert.equal(phase2Summary.status, 200);
+  assert.equal(phase2Summary.body.data.totalCustomerOutstanding, 2000);
+  assert.equal(phase2Summary.body.data.totalSupplierOutstanding, 20000);
+  assert.ok(phase2Summary.body.data.eggSalesTotal >= 7000);
+  assert.ok(phase2Summary.body.data.birdSalesTotal >= 12500);
+  assert.ok(phase2Summary.body.data.feedExpenseTotal >= 60000);
+
+  // 12i. Enhanced Financial Reports Verification (Sales summaries, feed summary, debt lists)
+  const phase2Reports = await request("/api/financial-reports?dateRange=month", { headers: authHeaders1 });
+  assert.equal(phase2Reports.status, 200);
+  assert.ok(phase2Reports.body.data.eggSalesSummary.totalRevenue >= 7000);
+  assert.ok(phase2Reports.body.data.eggSalesSummary.totalQuantity >= 20);
+  assert.ok(phase2Reports.body.data.birdSalesSummary.totalRevenue >= 12500);
+  assert.ok(phase2Reports.body.data.birdSalesSummary.totalQuantity >= 25);
+  assert.ok(phase2Reports.body.data.feedCostSummary.totalSpent >= 60000);
+  assert.ok(phase2Reports.body.data.feedCostSummary.totalQuantity >= 50);
+  assert.equal(phase2Reports.body.data.customerDebtSummary.totalOutstanding, 2000);
+  assert.equal(phase2Reports.body.data.supplierPayablesSummary.totalOutstanding, 20000);
+
+  // 12j. Unsettled Transactions Filter Verification
+  const unsettledRes = await request("/api/financial-transactions?paymentStatus=UNSETTLED", { headers: authHeaders1 });
+  assert.equal(unsettledRes.status, 200);
+  assert.ok(unsettledRes.body.data.some((t) => t.id === eggSaleId));
+  assert.ok(unsettledRes.body.data.some((t) => t.id === feedPurchaseId));
+
+  // 12k. Clean up Phase 2 test entities
+  await request(`/api/income/${eggSaleId}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/income/${birdSaleId}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/expenses/${feedPurchaseId}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/customers/${customerId}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/suppliers/${supplierId}`, { method: "DELETE", headers: authHeaders1 });
+
   // 12. Cleanup and Deletion
   const deletePlan = await request(`/api/slaughter-plans/${planId}`, {
     method: "DELETE",

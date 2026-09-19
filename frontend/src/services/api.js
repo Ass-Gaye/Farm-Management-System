@@ -263,9 +263,20 @@ export const getFinancialTransactions = async (params = {}) => {
   return request(`/finances/transactions${queryString}`);
 };
 
-export const getFinancialReports = async (houseId) => {
-  const query = houseId ? `?houseId=${houseId}` : "";
-  return request(`/finances/reports${query}`);
+export const getFinancialReports = async (params = {}) => {
+  let queryString = "";
+  if (typeof params === "number" || typeof params === "string") {
+    queryString = `?houseId=${params}`;
+  } else if (params && typeof params === "object") {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, val]) => {
+      if (val !== undefined && val !== null && val !== "") {
+        queryParams.append(key, val);
+      }
+    });
+    queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  }
+  return request(`/finances/reports${queryString}`);
 };
 
 // Expenses CRUD
@@ -336,6 +347,80 @@ export const updateIncome = async (id, incomeData) => {
 
 export const deleteIncome = async (id) => {
   return request(`/income/${id}`, {
+    method: "DELETE",
+  });
+};
+
+// ==================== Customers ====================
+
+export const getCustomers = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/customers${queryString}`);
+};
+
+export const getCustomerById = async (id) => {
+  return request(`/customers/${id}`);
+};
+
+export const createCustomer = async (customerData) => {
+  return request("/customers", {
+    method: "POST",
+    body: JSON.stringify(customerData),
+  });
+};
+
+export const updateCustomer = async (id, customerData) => {
+  return request(`/customers/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(customerData),
+  });
+};
+
+export const deleteCustomer = async (id) => {
+  return request(`/customers/${id}`, {
+    method: "DELETE",
+  });
+};
+
+// ==================== Suppliers ====================
+
+export const getSuppliers = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/suppliers${queryString}`);
+};
+
+export const getSupplierById = async (id) => {
+  return request(`/suppliers/${id}`);
+};
+
+export const createSupplier = async (supplierData) => {
+  return request("/suppliers", {
+    method: "POST",
+    body: JSON.stringify(supplierData),
+  });
+};
+
+export const updateSupplier = async (id, supplierData) => {
+  return request(`/suppliers/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(supplierData),
+  });
+};
+
+export const deleteSupplier = async (id) => {
+  return request(`/suppliers/${id}`, {
     method: "DELETE",
   });
 };

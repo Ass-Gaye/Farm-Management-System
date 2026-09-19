@@ -5,6 +5,8 @@ const runSerializable = async (operation) => {
     try {
       return await prisma.$transaction(operation, {
         isolationLevel: "Serializable",
+        maxWait: 15000,
+        timeout: 30000,
       });
     } catch (error) {
       if (error.code !== "P2034" || attempt === 3) {

@@ -1,19 +1,16 @@
 const prisma = require("../lib/prisma");
 
 /**
- * Validates that an optional houseId and optional breedId belong to the authenticated user.
- *
- * @param {number} userId Authenticated user ID
- * @param {number|null|undefined} houseId Optional house ID
- * @param {number|null|undefined} breedId Optional breed ID
- * @returns {Promise<{ valid: boolean, error?: string, status?: number }>}
+ * Validates that optional houseId, breedId, customerId, or supplierId belong to the authenticated user.
  */
-const validateOwnership = async (userId, houseId, breedId) => {
+const validateOwnership = async (userId, houseId, breedId, customerId, supplierId) => {
+  const uid = Number(userId);
+
   if (houseId) {
     const house = await prisma.poultryHouse.findFirst({
       where: {
         id: Number(houseId),
-        userId: Number(userId),
+        userId: uid,
       },
     });
 
@@ -31,7 +28,7 @@ const validateOwnership = async (userId, houseId, breedId) => {
       where: {
         id: Number(breedId),
         house: {
-          userId: Number(userId),
+          userId: uid,
           ...(houseId ? { id: Number(houseId) } : {}),
         },
       },
@@ -46,7 +43,82 @@ const validateOwnership = async (userId, houseId, breedId) => {
     }
   }
 
+  if (customerId) {
+    const customer = await prisma.customer.findFirst({
+      where: {
+        id: Number(customerId),
+        userId: uid,
+      },
+    });
+
+    if (!customer) {
+      return {
+        valid: false,
+        status: 404,
+        error: "Customer not found or does not belong to your farm",
+      };
+    }
+  }
+
+  if (supplierId) {
+    const supplier = await prisma.supplier.findFirst({
+      where: {
+        id: Number(supplierId),
+        userId: uid,
+      },
+    });
+
+    if (!supplier) {
+      return {
+        valid: false,
+        status: 404,
+        error: "Supplier not found or does not belong to your farm",
+      };
+    }
+  }
+
   return { valid: true };
+};
+
+/**
+ * Computes monetary amount, amountPaid, amountDue, and paymentStatus invariants.
+ */
+const computePaymentState = (amountInput, amountPaidInput, explicitStatus) => {
+  const amount = Number(amountInput);
+  let amountPaid;
+
+  if (amountPaidInput === undefined || amountPaidInput === null || amountPaidInput === "") {
+    amountPaid = amount;
+  } else {
+    amountPaid = Number(amountPaidInput);
+  }
+
+  if (amountPaid < 0) amountPaid = 0;
+  if (amountPaid > amount) {
+    amountPaid = amount;
+  }
+
+  const amountDue = Math.max(0, Number((amount - amountPaid).toFixed(2)));
+
+  let paymentStatus = "PAID";
+  if (explicitStatus && ["PAID", "PARTIALLY_PAID", "UNPAID"].includes(explicitStatus)) {
+    paymentStatus = explicitStatus;
+  } else {
+    if (amountDue === 0 || amountPaid >= amount) {
+      paymentStatus = "PAID";
+    } else if (amountPaid > 0 && amountPaid < amount) {
+      paymentStatus = "PARTIALLY_PAID";
+    } else if (amountPaid === 0) {
+      paymentStatus = "UNPAID";
+    }
+  }
+
+  return {
+    amount,
+    amountPaid,
+    amountDue,
+    paymentStatus,
+  };
 };
 
 // ==========================================
@@ -58,9 +130,22 @@ const validateOwnership = async (userId, houseId, breedId) => {
  */
 const createExpense = async (req, res, next) => {
   try {
-    const { houseId, breedId, category, amount, date, description } = req.body;
+    const {
+      houseId,
+      breedId,
+      supplierId,
+      category,
+      amount,
+      date,
+      description,
+      quantity,
+      unit,
+      unitPrice,
+      amountPaid,
+      paymentStatus,
+    } = req.body;
 
-    const check = await validateOwnership(req.user.id, houseId, breedId);
+    const check = await validateOwnership(req.user.id, houseId, breedId, null, supplierId);
     if (!check.valid) {
       return res.status(check.status).json({
         success: false,
@@ -68,15 +153,30 @@ const createExpense = async (req, res, next) => {
       });
     }
 
+    // Auto-derive total if quantity and unitPrice provided without explicit amount
+    let finalAmount = amount;
+    if ((finalAmount === undefined || finalAmount === null) && quantity && unitPrice) {
+      finalAmount = Number((Number(quantity) * Number(unitPrice)).toFixed(2));
+    }
+
+    const payState = computePaymentState(finalAmount, amountPaid, paymentStatus);
+
     const expense = await prisma.expense.create({
       data: {
         userId: req.user.id,
         houseId: houseId ? Number(houseId) : null,
         breedId: breedId ? Number(breedId) : null,
+        supplierId: supplierId ? Number(supplierId) : null,
         category: category.trim(),
-        amount: Number(amount),
+        amount: payState.amount,
         date: new Date(date),
         description: description ? description.trim() : null,
+        quantity: quantity !== undefined && quantity !== null && quantity !== "" ? Number(quantity) : null,
+        unit: unit ? unit.trim() : null,
+        unitPrice: unitPrice !== undefined && unitPrice !== null && unitPrice !== "" ? Number(unitPrice) : null,
+        amountPaid: payState.amountPaid,
+        amountDue: payState.amountDue,
+        paymentStatus: payState.paymentStatus,
       },
       include: {
         house: {
@@ -84,6 +184,9 @@ const createExpense = async (req, res, next) => {
         },
         breed: {
           select: { id: true, name: true },
+        },
+        supplier: {
+          select: { id: true, name: true, phone: true, category: true },
         },
       },
     });
@@ -94,6 +197,10 @@ const createExpense = async (req, res, next) => {
       data: {
         ...expense,
         amount: Number(expense.amount),
+        amountPaid: Number(expense.amountPaid || 0),
+        amountDue: Number(expense.amountDue || 0),
+        quantity: expense.quantity ? Number(expense.quantity) : null,
+        unitPrice: expense.unitPrice ? Number(expense.unitPrice) : null,
       },
     });
   } catch (error) {
@@ -102,11 +209,11 @@ const createExpense = async (req, res, next) => {
 };
 
 /**
- * Retrieves all expenses belonging to the authenticated user.
+ * Retrieves all expenses belonging to the authenticated user with filtering.
  */
 const getExpenses = async (req, res, next) => {
   try {
-    const { houseId, category, startDate, endDate } = req.query;
+    const { houseId, supplierId, category, paymentStatus, startDate, endDate } = req.query;
 
     const where = {
       userId: req.user.id,
@@ -116,8 +223,20 @@ const getExpenses = async (req, res, next) => {
       where.houseId = Number(houseId);
     }
 
+    if (supplierId) {
+      where.supplierId = Number(supplierId);
+    }
+
     if (category) {
       where.category = String(category);
+    }
+
+    if (paymentStatus) {
+      if (paymentStatus === "UNSETTLED" || paymentStatus === "OUTSTANDING") {
+        where.paymentStatus = { in: ["PARTIALLY_PAID", "UNPAID"] };
+      } else {
+        where.paymentStatus = String(paymentStatus);
+      }
     }
 
     if (startDate || endDate) {
@@ -139,6 +258,9 @@ const getExpenses = async (req, res, next) => {
         breed: {
           select: { id: true, name: true },
         },
+        supplier: {
+          select: { id: true, name: true, phone: true, category: true },
+        },
       },
       orderBy: {
         date: "desc",
@@ -150,6 +272,10 @@ const getExpenses = async (req, res, next) => {
       data: expenses.map((e) => ({
         ...e,
         amount: Number(e.amount),
+        amountPaid: Number(e.amountPaid || 0),
+        amountDue: Number(e.amountDue || 0),
+        quantity: e.quantity ? Number(e.quantity) : null,
+        unitPrice: e.unitPrice ? Number(e.unitPrice) : null,
       })),
     });
   } catch (error) {
@@ -176,6 +302,9 @@ const getExpenseById = async (req, res, next) => {
         breed: {
           select: { id: true, name: true },
         },
+        supplier: {
+          select: { id: true, name: true, phone: true, category: true },
+        },
       },
     });
 
@@ -191,6 +320,10 @@ const getExpenseById = async (req, res, next) => {
       data: {
         ...expense,
         amount: Number(expense.amount),
+        amountPaid: Number(expense.amountPaid || 0),
+        amountDue: Number(expense.amountDue || 0),
+        quantity: expense.quantity ? Number(expense.quantity) : null,
+        unitPrice: expense.unitPrice ? Number(expense.unitPrice) : null,
       },
     });
   } catch (error) {
@@ -204,7 +337,20 @@ const getExpenseById = async (req, res, next) => {
 const updateExpense = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { houseId, breedId, category, amount, date, description } = req.body;
+    const {
+      houseId,
+      breedId,
+      supplierId,
+      category,
+      amount,
+      date,
+      description,
+      quantity,
+      unit,
+      unitPrice,
+      amountPaid,
+      paymentStatus,
+    } = req.body;
 
     const existing = await prisma.expense.findFirst({
       where: {
@@ -220,13 +366,18 @@ const updateExpense = async (req, res, next) => {
       });
     }
 
-    const check = await validateOwnership(req.user.id, houseId, breedId);
+    const check = await validateOwnership(req.user.id, houseId, breedId, null, supplierId);
     if (!check.valid) {
       return res.status(check.status).json({
         success: false,
         message: check.error,
       });
     }
+
+    const effectiveAmount = amount !== undefined ? Number(amount) : Number(existing.amount);
+    const wasFullyPaid = Number(existing.amountDue || 0) === 0 || Number(existing.amountPaid || 0) >= Number(existing.amount);
+    const effectivePaid = amountPaid !== undefined ? Math.min(Number(amountPaid), effectiveAmount) : wasFullyPaid ? effectiveAmount : Math.min(Number(existing.amountPaid || 0), effectiveAmount);
+    const payState = computePaymentState(effectiveAmount, effectivePaid, paymentStatus);
 
     const updated = await prisma.expense.update({
       where: {
@@ -235,10 +386,17 @@ const updateExpense = async (req, res, next) => {
       data: {
         houseId: houseId !== undefined ? (houseId ? Number(houseId) : null) : existing.houseId,
         breedId: breedId !== undefined ? (breedId ? Number(breedId) : null) : existing.breedId,
+        supplierId: supplierId !== undefined ? (supplierId ? Number(supplierId) : null) : existing.supplierId,
         category: category !== undefined ? category.trim() : existing.category,
-        amount: amount !== undefined ? Number(amount) : existing.amount,
+        amount: payState.amount,
         date: date ? new Date(date) : existing.date,
         description: description !== undefined ? (description ? description.trim() : null) : existing.description,
+        quantity: quantity !== undefined ? (quantity !== null && quantity !== "" ? Number(quantity) : null) : existing.quantity,
+        unit: unit !== undefined ? (unit ? unit.trim() : null) : existing.unit,
+        unitPrice: unitPrice !== undefined ? (unitPrice !== null && unitPrice !== "" ? Number(unitPrice) : null) : existing.unitPrice,
+        amountPaid: payState.amountPaid,
+        amountDue: payState.amountDue,
+        paymentStatus: payState.paymentStatus,
       },
       include: {
         house: {
@@ -246,6 +404,9 @@ const updateExpense = async (req, res, next) => {
         },
         breed: {
           select: { id: true, name: true },
+        },
+        supplier: {
+          select: { id: true, name: true, phone: true, category: true },
         },
       },
     });
@@ -256,6 +417,10 @@ const updateExpense = async (req, res, next) => {
       data: {
         ...updated,
         amount: Number(updated.amount),
+        amountPaid: Number(updated.amountPaid || 0),
+        amountDue: Number(updated.amountDue || 0),
+        quantity: updated.quantity ? Number(updated.quantity) : null,
+        unitPrice: updated.unitPrice ? Number(updated.unitPrice) : null,
       },
     });
   } catch (error) {
@@ -308,9 +473,22 @@ const deleteExpense = async (req, res, next) => {
  */
 const createIncome = async (req, res, next) => {
   try {
-    const { houseId, breedId, category, amount, date, description } = req.body;
+    const {
+      houseId,
+      breedId,
+      customerId,
+      category,
+      amount,
+      date,
+      description,
+      quantity,
+      unit,
+      unitPrice,
+      amountPaid,
+      paymentStatus,
+    } = req.body;
 
-    const check = await validateOwnership(req.user.id, houseId, breedId);
+    const check = await validateOwnership(req.user.id, houseId, breedId, customerId, null);
     if (!check.valid) {
       return res.status(check.status).json({
         success: false,
@@ -318,15 +496,30 @@ const createIncome = async (req, res, next) => {
       });
     }
 
+    // Auto-derive total if quantity and unitPrice provided without explicit amount
+    let finalAmount = amount;
+    if ((finalAmount === undefined || finalAmount === null) && quantity && unitPrice) {
+      finalAmount = Number((Number(quantity) * Number(unitPrice)).toFixed(2));
+    }
+
+    const payState = computePaymentState(finalAmount, amountPaid, paymentStatus);
+
     const income = await prisma.income.create({
       data: {
         userId: req.user.id,
         houseId: houseId ? Number(houseId) : null,
         breedId: breedId ? Number(breedId) : null,
+        customerId: customerId ? Number(customerId) : null,
         category: category.trim(),
-        amount: Number(amount),
+        amount: payState.amount,
         date: new Date(date),
         description: description ? description.trim() : null,
+        quantity: quantity !== undefined && quantity !== null && quantity !== "" ? Number(quantity) : null,
+        unit: unit ? unit.trim() : null,
+        unitPrice: unitPrice !== undefined && unitPrice !== null && unitPrice !== "" ? Number(unitPrice) : null,
+        amountPaid: payState.amountPaid,
+        amountDue: payState.amountDue,
+        paymentStatus: payState.paymentStatus,
       },
       include: {
         house: {
@@ -334,6 +527,9 @@ const createIncome = async (req, res, next) => {
         },
         breed: {
           select: { id: true, name: true },
+        },
+        customer: {
+          select: { id: true, name: true, phone: true, email: true },
         },
       },
     });
@@ -344,6 +540,10 @@ const createIncome = async (req, res, next) => {
       data: {
         ...income,
         amount: Number(income.amount),
+        amountPaid: Number(income.amountPaid || 0),
+        amountDue: Number(income.amountDue || 0),
+        quantity: income.quantity ? Number(income.quantity) : null,
+        unitPrice: income.unitPrice ? Number(income.unitPrice) : null,
       },
     });
   } catch (error) {
@@ -352,11 +552,11 @@ const createIncome = async (req, res, next) => {
 };
 
 /**
- * Retrieves all income records belonging to the authenticated user.
+ * Retrieves all income records belonging to the authenticated user with filtering.
  */
 const getIncome = async (req, res, next) => {
   try {
-    const { houseId, category, startDate, endDate } = req.query;
+    const { houseId, customerId, category, paymentStatus, startDate, endDate } = req.query;
 
     const where = {
       userId: req.user.id,
@@ -366,8 +566,20 @@ const getIncome = async (req, res, next) => {
       where.houseId = Number(houseId);
     }
 
+    if (customerId) {
+      where.customerId = Number(customerId);
+    }
+
     if (category) {
       where.category = String(category);
+    }
+
+    if (paymentStatus) {
+      if (paymentStatus === "UNSETTLED" || paymentStatus === "OUTSTANDING") {
+        where.paymentStatus = { in: ["PARTIALLY_PAID", "UNPAID"] };
+      } else {
+        where.paymentStatus = String(paymentStatus);
+      }
     }
 
     if (startDate || endDate) {
@@ -389,6 +601,9 @@ const getIncome = async (req, res, next) => {
         breed: {
           select: { id: true, name: true },
         },
+        customer: {
+          select: { id: true, name: true, phone: true, email: true },
+        },
       },
       orderBy: {
         date: "desc",
@@ -400,6 +615,10 @@ const getIncome = async (req, res, next) => {
       data: incomeList.map((i) => ({
         ...i,
         amount: Number(i.amount),
+        amountPaid: Number(i.amountPaid || 0),
+        amountDue: Number(i.amountDue || 0),
+        quantity: i.quantity ? Number(i.quantity) : null,
+        unitPrice: i.unitPrice ? Number(i.unitPrice) : null,
       })),
     });
   } catch (error) {
@@ -426,6 +645,9 @@ const getIncomeById = async (req, res, next) => {
         breed: {
           select: { id: true, name: true },
         },
+        customer: {
+          select: { id: true, name: true, phone: true, email: true },
+        },
       },
     });
 
@@ -441,6 +663,10 @@ const getIncomeById = async (req, res, next) => {
       data: {
         ...income,
         amount: Number(income.amount),
+        amountPaid: Number(income.amountPaid || 0),
+        amountDue: Number(income.amountDue || 0),
+        quantity: income.quantity ? Number(income.quantity) : null,
+        unitPrice: income.unitPrice ? Number(income.unitPrice) : null,
       },
     });
   } catch (error) {
@@ -454,7 +680,20 @@ const getIncomeById = async (req, res, next) => {
 const updateIncome = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { houseId, breedId, category, amount, date, description } = req.body;
+    const {
+      houseId,
+      breedId,
+      customerId,
+      category,
+      amount,
+      date,
+      description,
+      quantity,
+      unit,
+      unitPrice,
+      amountPaid,
+      paymentStatus,
+    } = req.body;
 
     const existing = await prisma.income.findFirst({
       where: {
@@ -470,13 +709,18 @@ const updateIncome = async (req, res, next) => {
       });
     }
 
-    const check = await validateOwnership(req.user.id, houseId, breedId);
+    const check = await validateOwnership(req.user.id, houseId, breedId, customerId, null);
     if (!check.valid) {
       return res.status(check.status).json({
         success: false,
         message: check.error,
       });
     }
+
+    const effectiveAmount = amount !== undefined ? Number(amount) : Number(existing.amount);
+    const wasFullyPaid = Number(existing.amountDue || 0) === 0 || Number(existing.amountPaid || 0) >= Number(existing.amount);
+    const effectivePaid = amountPaid !== undefined ? Math.min(Number(amountPaid), effectiveAmount) : wasFullyPaid ? effectiveAmount : Math.min(Number(existing.amountPaid || 0), effectiveAmount);
+    const payState = computePaymentState(effectiveAmount, effectivePaid, paymentStatus);
 
     const updated = await prisma.income.update({
       where: {
@@ -485,10 +729,17 @@ const updateIncome = async (req, res, next) => {
       data: {
         houseId: houseId !== undefined ? (houseId ? Number(houseId) : null) : existing.houseId,
         breedId: breedId !== undefined ? (breedId ? Number(breedId) : null) : existing.breedId,
+        customerId: customerId !== undefined ? (customerId ? Number(customerId) : null) : existing.customerId,
         category: category !== undefined ? category.trim() : existing.category,
-        amount: amount !== undefined ? Number(amount) : existing.amount,
+        amount: payState.amount,
         date: date ? new Date(date) : existing.date,
         description: description !== undefined ? (description ? description.trim() : null) : existing.description,
+        quantity: quantity !== undefined ? (quantity !== null && quantity !== "" ? Number(quantity) : null) : existing.quantity,
+        unit: unit !== undefined ? (unit ? unit.trim() : null) : existing.unit,
+        unitPrice: unitPrice !== undefined ? (unitPrice !== null && unitPrice !== "" ? Number(unitPrice) : null) : existing.unitPrice,
+        amountPaid: payState.amountPaid,
+        amountDue: payState.amountDue,
+        paymentStatus: payState.paymentStatus,
       },
       include: {
         house: {
@@ -496,6 +747,9 @@ const updateIncome = async (req, res, next) => {
         },
         breed: {
           select: { id: true, name: true },
+        },
+        customer: {
+          select: { id: true, name: true, phone: true, email: true },
         },
       },
     });
@@ -506,6 +760,10 @@ const updateIncome = async (req, res, next) => {
       data: {
         ...updated,
         amount: Number(updated.amount),
+        amountPaid: Number(updated.amountPaid || 0),
+        amountDue: Number(updated.amountDue || 0),
+        quantity: updated.quantity ? Number(updated.quantity) : null,
+        unitPrice: updated.unitPrice ? Number(updated.unitPrice) : null,
       },
     });
   } catch (error) {
@@ -554,7 +812,8 @@ const deleteIncome = async (req, res, next) => {
 // ==========================================
 
 /**
- * Retrieves aggregate financial KPI metrics for the farm / user.
+ * Retrieves aggregate financial KPI metrics for the farm / user,
+ * including cash flow, customer receivables, and supplier payables.
  */
 const getFinancialSummary = async (req, res, next) => {
   try {
@@ -570,7 +829,7 @@ const getFinancialSummary = async (req, res, next) => {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfWeek = new Date(now);
     const dayOfWeek = now.getDay();
-    const diffToMonday = (dayOfWeek + 6) % 7; // Monday as start of week
+    const diffToMonday = (dayOfWeek + 6) % 7;
     startOfWeek.setDate(now.getDate() - diffToMonday);
     startOfWeek.setHours(0, 0, 0, 0);
 
@@ -584,11 +843,11 @@ const getFinancialSummary = async (req, res, next) => {
     ] = await Promise.all([
       prisma.expense.findMany({
         where: whereBase,
-        select: { amount: true },
+        select: { amount: true, amountDue: true, category: true },
       }),
       prisma.income.findMany({
         where: whereBase,
-        select: { amount: true },
+        select: { amount: true, amountDue: true, category: true },
       }),
       prisma.expense.findMany({
         where: {
@@ -630,6 +889,23 @@ const getFinancialSummary = async (req, res, next) => {
     const weeklyExpenses = weekExpenses.reduce((sum, item) => sum + Number(item.amount), 0);
     const weeklyIncome = weekIncome.reduce((sum, item) => sum + Number(item.amount), 0);
 
+    // Phase 2 Receivables & Payables
+    const totalCustomerOutstanding = allIncome.reduce((sum, item) => sum + Number(item.amountDue || 0), 0);
+    const totalSupplierOutstanding = allExpenses.reduce((sum, item) => sum + Number(item.amountDue || 0), 0);
+
+    // Category specifics
+    const eggSalesTotal = allIncome
+      .filter((i) => i.category.toLowerCase().includes("egg"))
+      .reduce((sum, i) => sum + Number(i.amount), 0);
+
+    const birdSalesTotal = allIncome
+      .filter((i) => i.category.toLowerCase().includes("bird"))
+      .reduce((sum, i) => sum + Number(i.amount), 0);
+
+    const feedExpenseTotal = allExpenses
+      .filter((e) => e.category.toLowerCase().includes("feed"))
+      .reduce((sum, e) => sum + Number(e.amount), 0);
+
     res.json({
       success: true,
       data: {
@@ -642,6 +918,11 @@ const getFinancialSummary = async (req, res, next) => {
         monthlyExpenses,
         weeklyIncome,
         weeklyExpenses,
+        totalCustomerOutstanding,
+        totalSupplierOutstanding,
+        eggSalesTotal,
+        birdSalesTotal,
+        feedExpenseTotal,
         expenseCount: allExpenses.length,
         incomeCount: allIncome.length,
       },
@@ -657,7 +938,7 @@ const getFinancialSummary = async (req, res, next) => {
 
 /**
  * Retrieves a combined list of income and expense transactions.
- * Supports filtering by type, category, date range, houseId, and search query.
+ * Supports filtering by type, category, date range, houseId, customerId, supplierId, paymentStatus, and search.
  */
 const getFinancialTransactions = async (req, res, next) => {
   try {
@@ -665,6 +946,9 @@ const getFinancialTransactions = async (req, res, next) => {
       type, // 'all' | 'expense' | 'income'
       category,
       houseId,
+      customerId,
+      supplierId,
+      paymentStatus,
       startDate,
       endDate,
       search,
@@ -677,6 +961,11 @@ const getFinancialTransactions = async (req, res, next) => {
       userId,
       ...(houseId ? { houseId: Number(houseId) } : {}),
       ...(category ? { category: String(category) } : {}),
+      ...(paymentStatus
+        ? paymentStatus === "UNSETTLED" || paymentStatus === "OUTSTANDING"
+          ? { paymentStatus: { in: ["PARTIALLY_PAID", "UNPAID"] } }
+          : { paymentStatus: String(paymentStatus) }
+        : {}),
     };
 
     if (startDate || endDate) {
@@ -693,21 +982,33 @@ const getFinancialTransactions = async (req, res, next) => {
     let income = [];
 
     if (!type || type === "all" || type === "expense") {
+      const expWhere = {
+        ...baseWhere,
+        ...(supplierId ? { supplierId: Number(supplierId) } : {}),
+      };
+
       expenses = await prisma.expense.findMany({
-        where: baseWhere,
+        where: expWhere,
         include: {
           house: { select: { id: true, name: true } },
           breed: { select: { id: true, name: true } },
+          supplier: { select: { id: true, name: true, phone: true } },
         },
       });
     }
 
     if (!type || type === "all" || type === "income") {
+      const incWhere = {
+        ...baseWhere,
+        ...(customerId ? { customerId: Number(customerId) } : {}),
+      };
+
       income = await prisma.income.findMany({
-        where: baseWhere,
+        where: incWhere,
         include: {
           house: { select: { id: true, name: true } },
           breed: { select: { id: true, name: true } },
+          customer: { select: { id: true, name: true, phone: true } },
         },
       });
     }
@@ -724,6 +1025,14 @@ const getFinancialTransactions = async (req, res, next) => {
         house: e.house,
         breedId: e.breedId,
         breed: e.breed,
+        supplierId: e.supplierId,
+        supplier: e.supplier,
+        quantity: e.quantity ? Number(e.quantity) : null,
+        unit: e.unit,
+        unitPrice: e.unitPrice ? Number(e.unitPrice) : null,
+        amountPaid: Number(e.amountPaid || 0),
+        amountDue: Number(e.amountDue || 0),
+        paymentStatus: e.paymentStatus || "PAID",
         createdAt: e.createdAt,
         updatedAt: e.updatedAt,
       })),
@@ -738,6 +1047,14 @@ const getFinancialTransactions = async (req, res, next) => {
         house: i.house,
         breedId: i.breedId,
         breed: i.breed,
+        customerId: i.customerId,
+        customer: i.customer,
+        quantity: i.quantity ? Number(i.quantity) : null,
+        unit: i.unit,
+        unitPrice: i.unitPrice ? Number(i.unitPrice) : null,
+        amountPaid: Number(i.amountPaid || 0),
+        amountDue: Number(i.amountDue || 0),
+        paymentStatus: i.paymentStatus || "PAID",
         createdAt: i.createdAt,
         updatedAt: i.updatedAt,
       })),
@@ -751,7 +1068,15 @@ const getFinancialTransactions = async (req, res, next) => {
         const cat = t.category.toLowerCase();
         const desc = (t.description || "").toLowerCase();
         const houseName = (t.house?.name || "").toLowerCase();
-        return cat.includes(q) || desc.includes(q) || houseName.includes(q);
+        const custName = (t.customer?.name || "").toLowerCase();
+        const suppName = (t.supplier?.name || "").toLowerCase();
+        return (
+          cat.includes(q) ||
+          desc.includes(q) ||
+          houseName.includes(q) ||
+          custName.includes(q) ||
+          suppName.includes(q)
+        );
       });
     }
 
@@ -776,13 +1101,17 @@ const getFinancialTransactions = async (req, res, next) => {
 // ==========================================
 
 /**
- * Retrieves breakdown reports:
+ * Retrieves breakdown reports with date range presets and business summaries:
  * - Category breakdowns for expenses and income
- * - Monthly trends for income, expenses, and net cash flow
+ * - Monthly trends
+ * - Detailed Egg Sales & Bird Sales summaries
+ * - Feed purchase cost summary
+ * - Customer Receivables summary
+ * - Supplier Payables summary
  */
 const getFinancialReports = async (req, res, next) => {
   try {
-    const { houseId } = req.query;
+    const { houseId, dateRange, startDate: customStart, endDate: customEnd } = req.query;
     const userId = req.user.id;
 
     const whereBase = {
@@ -790,14 +1119,77 @@ const getFinancialReports = async (req, res, next) => {
       ...(houseId ? { houseId: Number(houseId) } : {}),
     };
 
-    const [expenses, income] = await Promise.all([
+    // Date Range calculation
+    let dateFilter = null;
+    const now = new Date();
+
+    if (dateRange === "today") {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      dateFilter = { gte: start, lte: end };
+    } else if (dateRange === "week") {
+      const dayOfWeek = now.getDay();
+      const diffToMonday = (dayOfWeek + 6) % 7;
+      const start = new Date(now);
+      start.setDate(now.getDate() - diffToMonday);
+      start.setHours(0, 0, 0, 0);
+      dateFilter = { gte: start };
+    } else if (dateRange === "month") {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      dateFilter = { gte: start };
+    } else if (dateRange === "last_month") {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      dateFilter = { gte: start, lte: end };
+    } else if (dateRange === "year") {
+      const start = new Date(now.getFullYear(), 0, 1);
+      dateFilter = { gte: start };
+    } else if (customStart || customEnd) {
+      dateFilter = {};
+      if (customStart) dateFilter.gte = new Date(customStart);
+      if (customEnd) dateFilter.lte = new Date(customEnd);
+    }
+
+    if (dateFilter) {
+      whereBase.date = dateFilter;
+    }
+
+    const [expenses, income, customersWithDebt, suppliersOwed] = await Promise.all([
       prisma.expense.findMany({
         where: whereBase,
+        include: {
+          supplier: { select: { id: true, name: true, phone: true } },
+          house: { select: { id: true, name: true } },
+        },
         orderBy: { date: "asc" },
       }),
       prisma.income.findMany({
         where: whereBase,
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          house: { select: { id: true, name: true } },
+        },
         orderBy: { date: "asc" },
+      }),
+      // Outstanding customer debts (regardless of date filter or within scope)
+      prisma.income.findMany({
+        where: {
+          userId,
+          amountDue: { gt: 0 },
+        },
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+        },
+      }),
+      // Outstanding supplier payables
+      prisma.expense.findMany({
+        where: {
+          userId,
+          amountDue: { gt: 0 },
+        },
+        include: {
+          supplier: { select: { id: true, name: true, phone: true } },
+        },
       }),
     ]);
 
@@ -812,10 +1204,12 @@ const getFinancialReports = async (req, res, next) => {
       expenseCategoryMap[e.category].total += amt;
       expenseCategoryMap[e.category].count += 1;
     }
-    const expenseBreakdown = Object.values(expenseCategoryMap).map((cat) => ({
-      ...cat,
-      percentage: totalExpenses > 0 ? Number(((cat.total / totalExpenses) * 100).toFixed(1)) : 0,
-    })).sort((a, b) => b.total - a.total);
+    const expenseBreakdown = Object.values(expenseCategoryMap)
+      .map((cat) => ({
+        ...cat,
+        percentage: totalExpenses > 0 ? Number(((cat.total / totalExpenses) * 100).toFixed(1)) : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
 
     // 2. Income Breakdown by Category
     const totalIncome = income.reduce((sum, i) => sum + Number(i.amount), 0);
@@ -828,10 +1222,12 @@ const getFinancialReports = async (req, res, next) => {
       incomeCategoryMap[i.category].total += amt;
       incomeCategoryMap[i.category].count += 1;
     }
-    const incomeBreakdown = Object.values(incomeCategoryMap).map((cat) => ({
-      ...cat,
-      percentage: totalIncome > 0 ? Number(((cat.total / totalIncome) * 100).toFixed(1)) : 0,
-    })).sort((a, b) => b.total - a.total);
+    const incomeBreakdown = Object.values(incomeCategoryMap)
+      .map((cat) => ({
+        ...cat,
+        percentage: totalIncome > 0 ? Number(((cat.total / totalIncome) * 100).toFixed(1)) : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
 
     // 3. Monthly Trends
     const monthNames = [
@@ -882,6 +1278,66 @@ const getFinancialReports = async (req, res, next) => {
       }))
       .sort((a, b) => a.key.localeCompare(b.key));
 
+    // 4. Product Specific Summaries (Egg Sales & Bird Sales)
+    const eggSales = income.filter((i) => i.category.toLowerCase().includes("egg"));
+    const eggTotalRevenue = eggSales.reduce((sum, i) => sum + Number(i.amount), 0);
+    const eggTotalQuantity = eggSales.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+    const eggSalesSummary = {
+      totalRevenue: eggTotalRevenue,
+      totalQuantity: eggTotalQuantity,
+      count: eggSales.length,
+      averageRevenue: eggSales.length > 0 ? Number((eggTotalRevenue / eggSales.length).toFixed(2)) : 0,
+    };
+
+    const birdSales = income.filter((i) => i.category.toLowerCase().includes("bird"));
+    const birdTotalRevenue = birdSales.reduce((sum, i) => sum + Number(i.amount), 0);
+    const birdTotalQuantity = birdSales.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+    const birdSalesSummary = {
+      totalRevenue: birdTotalRevenue,
+      totalQuantity: birdTotalQuantity,
+      count: birdSales.length,
+      averageRevenue: birdSales.length > 0 ? Number((birdTotalRevenue / birdSales.length).toFixed(2)) : 0,
+    };
+
+    // 5. Feed Purchase Summary
+    const feedPurchases = expenses.filter((e) => e.category.toLowerCase().includes("feed"));
+    const feedTotalSpent = feedPurchases.reduce((sum, e) => sum + Number(e.amount), 0);
+    const feedTotalQuantity = feedPurchases.reduce((sum, e) => sum + Number(e.quantity || 0), 0);
+    const feedCostSummary = {
+      totalSpent: feedTotalSpent,
+      totalQuantity: feedTotalQuantity,
+      count: feedPurchases.length,
+      averageSpent: feedPurchases.length > 0 ? Number((feedTotalSpent / feedPurchases.length).toFixed(2)) : 0,
+    };
+
+    // 6. Customer Debts / Receivables
+    const totalCustomerOutstanding = customersWithDebt.reduce((sum, i) => sum + Number(i.amountDue || 0), 0);
+    const debtorMap = {};
+    for (const item of customersWithDebt) {
+      const cId = item.customer?.id || `unassigned-${item.id}`;
+      const cName = item.customer?.name || "Unassigned Customer";
+      const cPhone = item.customer?.phone || "";
+      if (!debtorMap[cId]) {
+        debtorMap[cId] = { id: item.customer?.id || null, name: cName, phone: cPhone, totalOutstanding: 0 };
+      }
+      debtorMap[cId].totalOutstanding += Number(item.amountDue || 0);
+    }
+    const topDebtors = Object.values(debtorMap).sort((a, b) => b.totalOutstanding - a.totalOutstanding);
+
+    // 7. Supplier Payables
+    const totalSupplierOutstanding = suppliersOwed.reduce((sum, e) => sum + Number(e.amountDue || 0), 0);
+    const payableMap = {};
+    for (const item of suppliersOwed) {
+      const sId = item.supplier?.id || `unassigned-${item.id}`;
+      const sName = item.supplier?.name || "Unassigned Supplier";
+      const sPhone = item.supplier?.phone || "";
+      if (!payableMap[sId]) {
+        payableMap[sId] = { id: item.supplier?.id || null, name: sName, phone: sPhone, totalOutstanding: 0 };
+      }
+      payableMap[sId].totalOutstanding += Number(item.amountDue || 0);
+    }
+    const topSuppliersOwed = Object.values(payableMap).sort((a, b) => b.totalOutstanding - a.totalOutstanding);
+
     res.json({
       success: true,
       data: {
@@ -893,6 +1349,17 @@ const getFinancialReports = async (req, res, next) => {
         expenseBreakdown,
         incomeBreakdown,
         monthlyTrends,
+        eggSalesSummary,
+        birdSalesSummary,
+        feedCostSummary,
+        customerDebtSummary: {
+          totalOutstanding: totalCustomerOutstanding,
+          topDebtors,
+        },
+        supplierPayablesSummary: {
+          totalOutstanding: totalSupplierOutstanding,
+          topSuppliersOwed,
+        },
       },
     });
   } catch (error) {

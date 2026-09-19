@@ -302,6 +302,140 @@ const INCOME_CATEGORIES = [
   "Other income",
 ];
 
+// Customer Schemas
+const createCustomerSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Customer name is required"),
+  phone: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  email: z
+    .string()
+    .trim()
+    .email("Please provide a valid email address")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  address: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  notes: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  active: z.boolean().optional().default(true),
+});
+
+const updateCustomerSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Customer name is required")
+    .optional(),
+  phone: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  email: z
+    .string()
+    .trim()
+    .email("Please provide a valid email address")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  address: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  notes: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  active: z.boolean().optional(),
+});
+
+// Supplier Schemas
+const createSupplierSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Supplier name is required"),
+  phone: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  email: z
+    .string()
+    .trim()
+    .email("Please provide a valid email address")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  address: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  category: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  notes: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  active: z.boolean().optional().default(true),
+});
+
+const updateSupplierSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Supplier name is required")
+    .optional(),
+  phone: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  email: z
+    .string()
+    .trim()
+    .email("Please provide a valid email address")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  address: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  category: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  notes: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  active: z.boolean().optional(),
+});
+
 // Expense Schemas
 const createExpenseSchema = z.object({
   houseId: z
@@ -316,15 +450,23 @@ const createExpenseSchema = z.object({
     .positive("Breed ID must be greater than 0")
     .optional()
     .nullable(),
+  supplierId: z
+    .number()
+    .int("Supplier ID must be a whole number")
+    .positive("Supplier ID must be greater than 0")
+    .optional()
+    .nullable(),
   category: z
     .string()
     .trim()
     .min(1, "Category is required"),
   amount: z.coerce
     .number({
-      error: "Amount is required and must be a valid number",
+      error: "Amount must be a valid number",
     })
-    .positive("Amount must be greater than 0"),
+    .positive("Amount must be greater than 0")
+    .optional()
+    .nullable(),
   date: z.coerce.date({
     error: "Date must be a valid date",
   }),
@@ -333,7 +475,39 @@ const createExpenseSchema = z.object({
     .trim()
     .optional()
     .nullable(),
-});
+  quantity: z.coerce
+    .number()
+    .positive("Quantity must be greater than 0")
+    .optional()
+    .nullable(),
+  unit: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  unitPrice: z.coerce
+    .number()
+    .nonnegative("Unit price cannot be negative")
+    .optional()
+    .nullable(),
+  amountPaid: z.coerce
+    .number()
+    .nonnegative("Amount paid cannot be negative")
+    .optional()
+    .nullable(),
+  amountDue: z.coerce
+    .number()
+    .nonnegative("Amount due cannot be negative")
+    .optional()
+    .nullable(),
+  paymentStatus: z
+    .enum(["PAID", "PARTIALLY_PAID", "UNPAID"])
+    .optional()
+    .nullable(),
+}).refine(
+  (data) => data.amount || (data.quantity && data.unitPrice),
+  { message: "Either amount or both quantity and unit price are required", path: ["amount"] }
+);
 
 const updateExpenseSchema = z.object({
   houseId: z
@@ -348,21 +522,60 @@ const updateExpenseSchema = z.object({
     .positive("Breed ID must be greater than 0")
     .optional()
     .nullable(),
+  supplierId: z
+    .number()
+    .int("Supplier ID must be a whole number")
+    .positive("Supplier ID must be greater than 0")
+    .optional()
+    .nullable(),
   category: z
     .string()
     .trim()
-    .min(1, "Category is required"),
+    .min(1, "Category is required")
+    .optional(),
   amount: z.coerce
     .number({
       error: "Amount is required and must be a valid number",
     })
-    .positive("Amount must be greater than 0"),
-  date: z.coerce.date({
-    error: "Date must be a valid date",
-  }),
+    .positive("Amount must be greater than 0")
+    .optional(),
+  date: z.coerce
+    .date({
+      error: "Date must be a valid date",
+    })
+    .optional(),
   description: z
     .string()
     .trim()
+    .optional()
+    .nullable(),
+  quantity: z.coerce
+    .number()
+    .positive("Quantity must be greater than 0")
+    .optional()
+    .nullable(),
+  unit: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  unitPrice: z.coerce
+    .number()
+    .nonnegative("Unit price cannot be negative")
+    .optional()
+    .nullable(),
+  amountPaid: z.coerce
+    .number()
+    .nonnegative("Amount paid cannot be negative")
+    .optional()
+    .nullable(),
+  amountDue: z.coerce
+    .number()
+    .nonnegative("Amount due cannot be negative")
+    .optional()
+    .nullable(),
+  paymentStatus: z
+    .enum(["PAID", "PARTIALLY_PAID", "UNPAID"])
     .optional()
     .nullable(),
 });
@@ -381,15 +594,23 @@ const createIncomeSchema = z.object({
     .positive("Breed ID must be greater than 0")
     .optional()
     .nullable(),
+  customerId: z
+    .number()
+    .int("Customer ID must be a whole number")
+    .positive("Customer ID must be greater than 0")
+    .optional()
+    .nullable(),
   category: z
     .string()
     .trim()
     .min(1, "Category is required"),
   amount: z.coerce
     .number({
-      error: "Amount is required and must be a valid number",
+      error: "Amount must be a valid number",
     })
-    .positive("Amount must be greater than 0"),
+    .positive("Amount must be greater than 0")
+    .optional()
+    .nullable(),
   date: z.coerce.date({
     error: "Date must be a valid date",
   }),
@@ -398,7 +619,39 @@ const createIncomeSchema = z.object({
     .trim()
     .optional()
     .nullable(),
-});
+  quantity: z.coerce
+    .number()
+    .positive("Quantity must be greater than 0")
+    .optional()
+    .nullable(),
+  unit: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  unitPrice: z.coerce
+    .number()
+    .nonnegative("Unit price cannot be negative")
+    .optional()
+    .nullable(),
+  amountPaid: z.coerce
+    .number()
+    .nonnegative("Amount paid cannot be negative")
+    .optional()
+    .nullable(),
+  amountDue: z.coerce
+    .number()
+    .nonnegative("Amount due cannot be negative")
+    .optional()
+    .nullable(),
+  paymentStatus: z
+    .enum(["PAID", "PARTIALLY_PAID", "UNPAID"])
+    .optional()
+    .nullable(),
+}).refine(
+  (data) => data.amount || (data.quantity && data.unitPrice),
+  { message: "Either amount or both quantity and unit price are required", path: ["amount"] }
+);
 
 const updateIncomeSchema = z.object({
   houseId: z
@@ -413,21 +666,60 @@ const updateIncomeSchema = z.object({
     .positive("Breed ID must be greater than 0")
     .optional()
     .nullable(),
+  customerId: z
+    .number()
+    .int("Customer ID must be a whole number")
+    .positive("Customer ID must be greater than 0")
+    .optional()
+    .nullable(),
   category: z
     .string()
     .trim()
-    .min(1, "Category is required"),
+    .min(1, "Category is required")
+    .optional(),
   amount: z.coerce
     .number({
       error: "Amount is required and must be a valid number",
     })
-    .positive("Amount must be greater than 0"),
-  date: z.coerce.date({
-    error: "Date must be a valid date",
-  }),
+    .positive("Amount must be greater than 0")
+    .optional(),
+  date: z.coerce
+    .date({
+      error: "Date must be a valid date",
+    })
+    .optional(),
   description: z
     .string()
     .trim()
+    .optional()
+    .nullable(),
+  quantity: z.coerce
+    .number()
+    .positive("Quantity must be greater than 0")
+    .optional()
+    .nullable(),
+  unit: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  unitPrice: z.coerce
+    .number()
+    .nonnegative("Unit price cannot be negative")
+    .optional()
+    .nullable(),
+  amountPaid: z.coerce
+    .number()
+    .nonnegative("Amount paid cannot be negative")
+    .optional()
+    .nullable(),
+  amountDue: z.coerce
+    .number()
+    .nonnegative("Amount due cannot be negative")
+    .optional()
+    .nullable(),
+  paymentStatus: z
+    .enum(["PAID", "PARTIALLY_PAID", "UNPAID"])
     .optional()
     .nullable(),
 });
@@ -455,6 +747,10 @@ module.exports = {
   updateSlaughterPlanSchema,
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
+  createCustomerSchema,
+  updateCustomerSchema,
+  createSupplierSchema,
+  updateSupplierSchema,
   createExpenseSchema,
   updateExpenseSchema,
   createIncomeSchema,

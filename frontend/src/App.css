@@ -1858,3 +1858,35 @@ tbody tr:last-child td {
     margin: 10px;
   }
 }
+
+/* Print stylesheet for Sales Receipts */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #printable-receipt,
+  #printable-receipt * {
+    visibility: visible;
+  }
+
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 24px;
+    margin: 0;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .no-print,
+  .modal-backdrop,
+  header,
+  nav,
+  .app-header,
+  .tabs-nav {
+    display: none !important;
+  }
+}

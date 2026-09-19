@@ -19,6 +19,8 @@ const birdConditionRoutes = require("./routes/birdCondition.routes");
 const slaughterPlanRoutes = require("./routes/slaughterPlan.routes");
 const expenseRoutes = require("./routes/expense.routes");
 const incomeRoutes = require("./routes/income.routes");
+const customerRoutes = require("./routes/customer.routes");
+const supplierRoutes = require("./routes/supplier.routes");
 const financeRoutes = require("./routes/finance.routes");
 const { authenticate } = require("./middleware/auth.middleware");
 const {
@@ -69,6 +71,8 @@ const createApp = () => {
   app.use("/api/slaughter-plans", slaughterPlanRoutes);
   app.use("/api/expenses", expenseRoutes);
   app.use("/api/income", incomeRoutes);
+  app.use("/api/customers", customerRoutes);
+  app.use("/api/suppliers", supplierRoutes);
   app.use("/api/finances", financeRoutes);
 
   // Financial route aliases

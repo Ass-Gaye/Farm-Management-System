@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { createExpense, updateExpense, createIncome, updateIncome } from "../services/api";
-import { DEFAULT_CURRENCY } from "../services/currency";
+import { DEFAULT_CURRENCY, formatCurrency } from "../services/currency";
 
 export const EXPENSE_CATEGORIES = [
   "Feed",
@@ -30,17 +30,30 @@ function FinanceTransactionModal({
   initialType = "Expense", // "Expense" or "Income"
   initialData = null, // if editing
   houses = [],
+  customers = [],
+  suppliers = [],
+  breeds = [],
   defaultHouseId = null,
   currency = DEFAULT_CURRENCY,
   onSuccess,
   onCancel,
+  onOpenCustomerModal,
+  onOpenSupplierModal,
 }) {
   const isEditing = Boolean(initialData?.id);
   const [type, setType] = useState(initialData?.type || initialType);
+
   const [formData, setFormData] = useState({
-    amount: "",
     category: "",
     customCategory: "",
+    customerId: "",
+    supplierId: "",
+    breedId: "",
+    quantity: "",
+    unit: "",
+    unitPrice: "",
+    amount: "",
+    amountPaid: "",
     date: new Date().toISOString().split("T")[0],
     houseId: "",
     description: "",
@@ -49,6 +62,7 @@ function FinanceTransactionModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Populate or reset form
   useEffect(() => {
     if (initialData) {
       setType(initialData.type || initialType);
@@ -56,20 +70,42 @@ function FinanceTransactionModal({
       const isStandardIncome = INCOME_CATEGORIES.includes(initialData.category);
       const isStandard = isStandardExpense || isStandardIncome;
 
+      const amt = initialData.amount !== undefined ? String(initialData.amount) : "";
+      const paid = initialData.amountPaid !== undefined && initialData.amountPaid !== null
+        ? String(initialData.amountPaid)
+        : amt;
+
       setFormData({
-        amount: initialData.amount !== undefined ? String(initialData.amount) : "",
         category: isStandard ? initialData.category : "Other",
         customCategory: isStandard ? "" : initialData.category || "",
+        customerId: initialData.customerId ? String(initialData.customerId) : "",
+        supplierId: initialData.supplierId ? String(initialData.supplierId) : "",
+        breedId: initialData.breedId ? String(initialData.breedId) : "",
+        quantity: initialData.quantity !== undefined && initialData.quantity !== null ? String(initialData.quantity) : "",
+        unit: initialData.unit || (initialData.category === "Egg sales" ? "trays" : initialData.category?.includes("bird") ? "birds" : initialData.category === "Feed" ? "bags" : ""),
+        unitPrice: initialData.unitPrice !== undefined && initialData.unitPrice !== null ? String(initialData.unitPrice) : "",
+        amount: amt,
+        amountPaid: paid,
         date: initialData.date ? new Date(initialData.date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
         houseId: initialData.houseId ? String(initialData.houseId) : "",
         description: initialData.description || "",
       });
     } else {
       setType(initialType);
+      const defaultCategory = initialType === "Income" ? INCOME_CATEGORIES[0] : EXPENSE_CATEGORIES[0];
+      const defaultUnit = defaultCategory === "Egg sales" ? "trays" : defaultCategory.includes("bird") ? "birds" : defaultCategory === "Feed" ? "bags" : "";
+
       setFormData({
-        amount: "",
-        category: initialType === "Income" ? INCOME_CATEGORIES[0] : EXPENSE_CATEGORIES[0],
+        category: defaultCategory,
         customCategory: "",
+        customerId: "",
+        supplierId: "",
+        breedId: "",
+        quantity: "",
+        unit: defaultUnit,
+        unitPrice: "",
+        amount: "",
+        amountPaid: "",
         date: new Date().toISOString().split("T")[0],
         houseId: defaultHouseId ? String(defaultHouseId) : "",
         description: "",
@@ -81,32 +117,102 @@ function FinanceTransactionModal({
   if (!isOpen) return null;
 
   const currentCategories = type === "Income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const isEggSale = type === "Income" && formData.category === "Egg sales";
+  const isBirdSale = type === "Income" && (formData.category === "Bird sales" || formData.category === "Spent/layer bird sales");
+  const isFeedExpense = type === "Expense" && formData.category === "Feed";
 
   const handleTypeChange = (newType) => {
-    if (isEditing) return; // Prevent changing type when editing an existing record
+    if (isEditing) return;
     setType(newType);
+    const defCat = newType === "Income" ? INCOME_CATEGORIES[0] : EXPENSE_CATEGORIES[0];
+    const defUnit = defCat === "Egg sales" ? "trays" : defCat.includes("bird") ? "birds" : defCat === "Feed" ? "bags" : "";
+
     setFormData((prev) => ({
       ...prev,
-      category: newType === "Income" ? INCOME_CATEGORIES[0] : EXPENSE_CATEGORIES[0],
+      category: defCat,
       customCategory: "",
+      unit: defUnit,
+      quantity: "",
+      unitPrice: "",
+      amount: "",
+      amountPaid: "",
+    }));
+  };
+
+  const handleCategoryChange = (e) => {
+    const newCat = e.target.value;
+    let defUnit = formData.unit;
+    if (newCat === "Egg sales") defUnit = "trays";
+    else if (newCat.includes("bird") || newCat === "Bird sales") defUnit = "birds";
+    else if (newCat === "Feed") defUnit = "bags";
+
+    setFormData((prev) => ({
+      ...prev,
+      category: newCat,
+      unit: defUnit,
     }));
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+
+    setFormData((prev) => {
+      const next = { ...prev, [name]: value };
+
+      // Auto-calculate Total Amount when quantity or unitPrice changes
+      if (name === "quantity" || name === "unitPrice") {
+        const q = parseFloat(name === "quantity" ? value : prev.quantity);
+        const p = parseFloat(name === "unitPrice" ? value : prev.unitPrice);
+
+        if (!isNaN(q) && q > 0 && !isNaN(p) && p >= 0) {
+          const calculatedTotal = Number((q * p).toFixed(2));
+          next.amount = String(calculatedTotal);
+          // If amountPaid was either empty or equal to previous total, keep it in sync with new total
+          if (!prev.amountPaid || prev.amountPaid === prev.amount) {
+            next.amountPaid = String(calculatedTotal);
+          }
+        }
+      }
+
+      // If amount directly edited and amountPaid empty, default amountPaid = amount
+      if (name === "amount" && (!prev.amountPaid || prev.amountPaid === prev.amount)) {
+        next.amountPaid = value;
+      }
+
+      return next;
+    });
   };
+
+  // Real-time calculation helpers
+  const totalAmount = parseFloat(formData.amount) || 0;
+  const paidAmount = formData.amountPaid === "" ? totalAmount : parseFloat(formData.amountPaid) || 0;
+  const outstandingAmount = Math.max(0, Number((totalAmount - paidAmount).toFixed(2)));
+
+  let derivedStatus = "PAID";
+  if (outstandingAmount === 0 || paidAmount >= totalAmount) {
+    derivedStatus = "PAID";
+  } else if (paidAmount > 0 && paidAmount < totalAmount) {
+    derivedStatus = "PARTIALLY_PAID";
+  } else {
+    derivedStatus = "UNPAID";
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
 
-    const numericAmount = parseFloat(formData.amount);
-    if (!formData.amount || isNaN(numericAmount) || numericAmount <= 0) {
-      setError("Please enter a valid positive amount.");
+    if (isNaN(totalAmount) || totalAmount <= 0) {
+      setError("Please enter a valid positive total amount.");
+      return;
+    }
+
+    if (paidAmount < 0) {
+      setError("Amount paid cannot be negative.");
+      return;
+    }
+
+    if (paidAmount > totalAmount) {
+      setError("Amount paid cannot exceed total amount.");
       return;
     }
 
@@ -126,11 +232,20 @@ function FinanceTransactionModal({
     }
 
     const payload = {
-      amount: numericAmount,
+      amount: totalAmount,
       category: finalCategory.trim(),
       date: formData.date,
       houseId: formData.houseId ? Number(formData.houseId) : null,
       description: formData.description ? formData.description.trim() : null,
+      quantity: formData.quantity ? parseFloat(formData.quantity) : null,
+      unit: formData.unit ? formData.unit.trim() : null,
+      unitPrice: formData.unitPrice ? parseFloat(formData.unitPrice) : null,
+      amountPaid: paidAmount,
+      amountDue: outstandingAmount,
+      paymentStatus: derivedStatus,
+      customerId: type === "Income" && formData.customerId ? Number(formData.customerId) : null,
+      supplierId: type === "Expense" && formData.supplierId ? Number(formData.supplierId) : null,
+      breedId: formData.breedId ? Number(formData.breedId) : null,
     };
 
     try {
@@ -161,16 +276,16 @@ function FinanceTransactionModal({
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal-content" style={{ maxWidth: 520 }}>
+      <div className="modal-content" style={{ maxWidth: 560 }}>
         <div className="modal-header">
           <div>
             <h3>
-              {isEditing ? `Edit ${type}` : `Record ${type}`}
+              {isEditing ? `Edit ${type}` : type === "Income" ? "Record Sale / Income" : "Record Purchase / Expense"}
             </h3>
             <p className="modal-subtitle">
-              {type === "Expense"
-                ? "Record money paid out for feed, supplies, health, or farm operations."
-                : "Record money received from poultry sales, eggs, or farm products."}
+              {type === "Income"
+                ? "Track egg or bird sales, select buyer, and monitor payment status."
+                : "Record feed purchases, vendor costs, and outstanding payables."}
             </p>
           </div>
           <button
@@ -183,7 +298,7 @@ function FinanceTransactionModal({
           </button>
         </div>
 
-        {/* Type toggle buttons when creating a new transaction */}
+        {/* Type toggle buttons when creating */}
         {!isEditing && (
           <div
             style={{
@@ -195,19 +310,6 @@ function FinanceTransactionModal({
           >
             <button
               type="button"
-              className={`filter-btn ${type === "Expense" ? "active" : ""}`}
-              onClick={() => handleTypeChange("Expense")}
-              style={{
-                flex: 1,
-                padding: "8px 12px",
-                borderColor: type === "Expense" ? "var(--pine-700)" : undefined,
-                fontWeight: type === "Expense" ? 700 : 500,
-              }}
-            >
-              💸 Expense (Money Out)
-            </button>
-            <button
-              type="button"
               className={`filter-btn ${type === "Income" ? "active" : ""}`}
               onClick={() => handleTypeChange("Income")}
               style={{
@@ -217,7 +319,20 @@ function FinanceTransactionModal({
                 fontWeight: type === "Income" ? 700 : 500,
               }}
             >
-              💰 Income (Money In)
+              💰 Sales & Income (Money In)
+            </button>
+            <button
+              type="button"
+              className={`filter-btn ${type === "Expense" ? "active" : ""}`}
+              onClick={() => handleTypeChange("Expense")}
+              style={{
+                flex: 1,
+                padding: "8px 12px",
+                borderColor: type === "Expense" ? "var(--pine-700)" : undefined,
+                fontWeight: type === "Expense" ? 700 : 500,
+              }}
+            >
+              💸 Purchases & Expenses (Money Out)
             </button>
           </div>
         )}
@@ -225,27 +340,70 @@ function FinanceTransactionModal({
         {error && <div className="form-error" style={{ margin: "0 24px 16px" }}>{error}</div>}
 
         <form onSubmit={handleSubmit} style={{ padding: "0 24px 24px" }}>
-          {/* Amount input */}
-          <div className="form-group">
-            <label htmlFor="tx-amount">
-              Amount ({currency}) <span style={{ color: "var(--alert-danger)" }}>*</span>
-            </label>
-            <div style={{ position: "relative" }}>
-              <input
-                id="tx-amount"
-                name="amount"
-                type="number"
-                step="0.01"
-                min="0.01"
-                placeholder="0.00"
-                value={formData.amount}
+          {/* Customer (for Income) or Supplier (for Expense) */}
+          {type === "Income" ? (
+            <div className="form-group">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <label htmlFor="tx-customer" style={{ marginBottom: 0 }}>
+                  Customer / Buyer
+                </label>
+                {onOpenCustomerModal && (
+                  <button
+                    type="button"
+                    className="link-subtle"
+                    onClick={onOpenCustomerModal}
+                    style={{ fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--pine-700)" }}
+                  >
+                    + Add New Customer
+                  </button>
+                )}
+              </div>
+              <select
+                id="tx-customer"
+                name="customerId"
+                value={formData.customerId}
                 onChange={handleChange}
-                required
-                autoFocus
-                style={{ fontSize: 16, fontWeight: 600 }}
-              />
+              >
+                <option value="">Cash / Walk-in Buyer (No profile)</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} {c.phone ? `(${c.phone})` : ""}
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
+          ) : (
+            <div className="form-group">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <label htmlFor="tx-supplier" style={{ marginBottom: 0 }}>
+                  Supplier / Vendor
+                </label>
+                {onOpenSupplierModal && (
+                  <button
+                    type="button"
+                    className="link-subtle"
+                    onClick={onOpenSupplierModal}
+                    style={{ fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--pine-700)" }}
+                  >
+                    + Add New Supplier
+                  </button>
+                )}
+              </div>
+              <select
+                id="tx-supplier"
+                name="supplierId"
+                value={formData.supplierId}
+                onChange={handleChange}
+              >
+                <option value="">General Supplier (No profile)</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} {s.category ? `[${s.category}]` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Category selection */}
           <div className="form-group">
@@ -256,7 +414,7 @@ function FinanceTransactionModal({
               id="tx-category"
               name="category"
               value={formData.category}
-              onChange={handleChange}
+              onChange={handleCategoryChange}
               required
             >
               {currentCategories.map((cat) => (
@@ -267,7 +425,7 @@ function FinanceTransactionModal({
             </select>
           </div>
 
-          {/* Custom category input if 'Other' is chosen */}
+          {/* Custom Category if "Other" */}
           {formData.category === "Other" && (
             <div className="form-group">
               <label htmlFor="tx-customCategory">Specify Custom Category</label>
@@ -275,57 +433,241 @@ function FinanceTransactionModal({
                 id="tx-customCategory"
                 name="customCategory"
                 type="text"
-                placeholder="e.g. Solar panel maintenance, Packaging crates..."
+                placeholder="e.g. Solar equipment, packaging crates..."
                 value={formData.customCategory}
                 onChange={handleChange}
               />
             </div>
           )}
 
-          {/* Date */}
-          <div className="form-group">
-            <label htmlFor="tx-date">
-              Transaction Date <span style={{ color: "var(--alert-danger)" }}>*</span>
-            </label>
-            <input
-              id="tx-date"
-              name="date"
-              type="date"
-              value={formData.date}
-              onChange={handleChange}
-              required
-            />
+          {/* Unit Pricing Section (Egg sales, Bird sales, Feed purchase, or general unit pricing) */}
+          <div
+            style={{
+              background: "var(--bg-surface-muted)",
+              padding: 14,
+              borderRadius: "var(--radius-md)",
+              marginBottom: 16,
+              border: "1px solid var(--border-subtle)",
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 10 }}>
+              {isEggSale
+                ? "🥚 Egg Quantity & Tray Pricing"
+                : isBirdSale
+                ? "🐔 Bird Quantity & Pricing"
+                : isFeedExpense
+                ? "🌾 Feed Bags & Unit Cost"
+                : "📦 Quantity & Unit Pricing (Optional)"}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1.2fr", gap: 10 }}>
+              <div>
+                <label style={{ fontSize: 11, marginBottom: 4, display: "block" }}>
+                  {isBirdSale ? "Number of Birds" : "Quantity"}
+                </label>
+                <input
+                  name="quantity"
+                  type="number"
+                  step="any"
+                  min="0"
+                  placeholder={isEggSale ? "e.g. 20" : isBirdSale ? "e.g. 25" : isFeedExpense ? "e.g. 50" : "Qty"}
+                  value={formData.quantity}
+                  onChange={handleChange}
+                  style={{ width: "100%", padding: "6px 8px", fontSize: 13 }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11, marginBottom: 4, display: "block" }}>Unit</label>
+                <input
+                  name="unit"
+                  type="text"
+                  placeholder={isEggSale ? "trays" : isBirdSale ? "birds" : isFeedExpense ? "bags" : "unit"}
+                  value={formData.unit}
+                  onChange={handleChange}
+                  style={{ width: "100%", padding: "6px 8px", fontSize: 13 }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11, marginBottom: 4, display: "block" }}>
+                  Price per Unit ({currency})
+                </label>
+                <input
+                  name="unitPrice"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder={isEggSale ? "e.g. 350" : isBirdSale ? "e.g. 500" : isFeedExpense ? "e.g. 1200" : "0.00"}
+                  value={formData.unitPrice}
+                  onChange={handleChange}
+                  style={{ width: "100%", padding: "6px 8px", fontSize: 13 }}
+                />
+              </div>
+            </div>
+
+            {formData.quantity && formData.unitPrice && (
+              <div style={{ marginTop: 8, fontSize: 11, color: "var(--pine-800)", fontStyle: "italic" }}>
+                Auto-calculated: {formData.quantity} {formData.unit || "units"} × {currency} {formData.unitPrice} ={" "}
+                <strong>{currency} {formData.amount}</strong>
+              </div>
+            )}
           </div>
 
-          {/* House Association */}
-          <div className="form-group">
-            <label htmlFor="tx-house">Poultry House (Optional)</label>
-            <select
-              id="tx-house"
-              name="houseId"
-              value={formData.houseId}
-              onChange={handleChange}
+          {/* Total Amount & Payment Breakdown */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="form-group">
+              <label htmlFor="tx-amount">
+                Total Amount ({currency}) <span style={{ color: "var(--alert-danger)" }}>*</span>
+              </label>
+              <input
+                id="tx-amount"
+                name="amount"
+                type="number"
+                step="0.01"
+                min="0.01"
+                placeholder="0.00"
+                value={formData.amount}
+                onChange={handleChange}
+                required
+                style={{ fontSize: 15, fontWeight: 700 }}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="tx-paid">
+                Amount Paid ({currency})
+              </label>
+              <input
+                id="tx-paid"
+                name="amountPaid"
+                type="number"
+                step="0.01"
+                min="0"
+                max={totalAmount > 0 ? totalAmount : undefined}
+                placeholder={formData.amount || "0.00"}
+                value={formData.amountPaid}
+                onChange={handleChange}
+                style={{ fontSize: 15, fontWeight: 600, color: "var(--alert-success)" }}
+              />
+            </div>
+          </div>
+
+          {/* Payment Status & Balance Banner */}
+          {totalAmount > 0 && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "8px 12px",
+                background:
+                  derivedStatus === "PAID"
+                    ? "#f0fdf4"
+                    : derivedStatus === "PARTIALLY_PAID"
+                    ? "#fffbeb"
+                    : "#fef2f2",
+                border: `1px solid ${
+                  derivedStatus === "PAID"
+                    ? "#bbf7d0"
+                    : derivedStatus === "PARTIALLY_PAID"
+                    ? "#fde68a"
+                    : "#fecaca"
+                }`,
+                borderRadius: "var(--radius-sm)",
+                marginBottom: 16,
+                fontSize: 12,
+              }}
             >
-              <option value="">Farm-wide / General (No specific house)</option>
-              {houses.map((house) => (
-                <option key={house.id} value={house.id}>
-                  {house.name}
-                </option>
-              ))}
-            </select>
-            <span style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
-              Link this transaction to a specific poultry house, or leave as General for whole-farm costs.
-            </span>
+              <div>
+                <span style={{ color: "var(--text-secondary)" }}>
+                  {type === "Income" ? "Buyer Balance Due:" : "Payables Owed to Supplier:"}
+                </span>{" "}
+                <strong
+                  style={{
+                    color: outstandingAmount > 0 ? "var(--alert-danger)" : "var(--alert-success)",
+                  }}
+                >
+                  {formatCurrency(outstandingAmount, currency)}
+                </strong>
+              </div>
+
+              <span
+                className={`badge ${
+                  derivedStatus === "PAID"
+                    ? "badge-healthy"
+                    : derivedStatus === "PARTIALLY_PAID"
+                    ? "badge-due-soon"
+                    : "badge-overdue"
+                }`}
+                style={{ fontSize: 11, fontWeight: 700 }}
+              >
+                {derivedStatus}
+              </span>
+            </div>
+          )}
+
+          {/* Date & House Association (plus Breed for Bird Sales) */}
+          <div style={{ display: "grid", gridTemplateColumns: isBirdSale && breeds?.length ? "1fr 1fr 1fr" : "1fr 1fr", gap: 12 }}>
+            <div className="form-group">
+              <label htmlFor="tx-date">
+                Date <span style={{ color: "var(--alert-danger)" }}>*</span>
+              </label>
+              <input
+                id="tx-date"
+                name="date"
+                type="date"
+                value={formData.date}
+                onChange={handleChange}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="tx-house">Poultry House</label>
+              <select
+                id="tx-house"
+                name="houseId"
+                value={formData.houseId}
+                onChange={handleChange}
+              >
+                <option value="">Whole Farm (General)</option>
+                {houses.map((house) => (
+                  <option key={house.id} value={house.id}>
+                    {house.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {isBirdSale && breeds?.length > 0 && (
+              <div className="form-group">
+                <label htmlFor="tx-breed">Breed / Bird Type</label>
+                <select
+                  id="tx-breed"
+                  name="breedId"
+                  value={formData.breedId}
+                  onChange={handleChange}
+                >
+                  <option value="">Select Breed (Optional)</option>
+                  {breeds.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} {b.type ? `(${b.type})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
-          {/* Description */}
+          {/* Notes / Description */}
           <div className="form-group">
-            <label htmlFor="tx-description">Notes / Description</label>
+            <label htmlFor="tx-description">Description / Notes</label>
             <textarea
               id="tx-description"
               name="description"
               rows={2}
-              placeholder="e.g. 20 bags layer feed from local mill, invoice #1042..."
+              placeholder="e.g. Wholesale delivery invoice #502, payment received via cash..."
               value={formData.description}
               onChange={handleChange}
             />
