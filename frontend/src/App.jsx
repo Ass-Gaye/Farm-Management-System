@@ -16,6 +16,7 @@ import HealthConditionFormPage from "./pages/HealthConditionFormPage";
 import SlaughterPlanningPage from "./pages/SlaughterPlanningPage";
 import SlaughterPlanFormPage from "./pages/SlaughterPlanFormPage";
 import HouseFormPage from "./pages/HouseFormPage";
+import FinancePage from "./pages/FinancePage";
 
 import "./App.css";
 
@@ -70,6 +71,9 @@ function AppContent() {
         <Route path="/slaughter-planning/new" element={<SlaughterPlanFormPage />} />
         <Route path="/slaughter-planning/:id/edit" element={<SlaughterPlanFormPage />} />
 
+        {/* 6. Financial Management */}
+        <Route path="/finances" element={<FinancePage />} />
+
         {/* Poultry House Management */}
         <Route path="/houses/new" element={<HouseFormPage />} />
         <Route path="/houses/:id/edit" element={<HouseFormPage />} />
@@ -82,6 +86,7 @@ function AppContent() {
           <Route path="breeds" element={<BreedsPage />} />
           <Route path="health-condition" element={<HealthConditionPage />} />
           <Route path="slaughter-planning" element={<SlaughterPlanningPage />} />
+          <Route path="finances" element={<FinancePage />} />
         </Route>
 
         {/* Fallback to Dashboard */}

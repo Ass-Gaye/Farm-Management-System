@@ -6,6 +6,7 @@ import {
   BreedsIcon,
   HealthIcon,
   SlaughterIcon,
+  FinanceIcon,
 } from "../Icons";
 
 function PageNavigation() {
@@ -41,6 +42,12 @@ function PageNavigation() {
       label: "Slaughter Planning",
       icon: <SlaughterIcon size={15} />,
       badge: slaughterPlans.length,
+    },
+    {
+      to: "/finances",
+      label: "Financials",
+      icon: <FinanceIcon size={15} />,
+      badge: null,
     },
   ];
 

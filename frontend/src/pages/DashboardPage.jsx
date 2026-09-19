@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useFarm } from "../context/useFarm";
 import {
@@ -7,7 +8,10 @@ import {
   SlaughterIcon,
   AlertTriangleIcon,
   ArrowRightIcon,
+  FinanceIcon,
 } from "../components/Icons";
+import { getFinancialSummary } from "../services/api";
+import { formatCurrency, DEFAULT_CURRENCY } from "../services/currency";
 
 function DashboardPage() {
   const navigate = useNavigate();
@@ -19,6 +23,26 @@ function DashboardPage() {
     setConfirmDialog,
     actionLoading,
   } = useFarm();
+
+  const [financeSummary, setFinanceSummary] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchFinances = async () => {
+      try {
+        const res = await getFinancialSummary(selectedHouse?.id);
+        if (!cancelled && res?.data) {
+          setFinanceSummary(res.data);
+        }
+      } catch {
+        // Non-blocking for main dashboard
+      }
+    };
+    fetchFinances();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHouse?.id]);
 
   if (!selectedHouse) {
     return null;
@@ -234,6 +258,21 @@ function DashboardPage() {
               Manage Slaughter Plans <ArrowRightIcon size={14} />
             </Link>
           </div>
+
+          {/* Farm Finances */}
+          <div className="quick-nav-card">
+            <div className="quick-nav-card-header">
+              <span className="quick-nav-icon"><FinanceIcon size={20} /></span>
+              <span className="badge badge-healthy">
+                {financeSummary ? formatCurrency(financeSummary.netCashFlow, financeSummary.currency || DEFAULT_CURRENCY) : "Finances"}
+              </span>
+            </div>
+            <h4>Farm Finances</h4>
+            <p>Track feed and operational expenses, egg & bird sales, and cash flow.</p>
+            <Link to="/finances" className="quick-nav-link">
+              View Financials <ArrowRightIcon size={14} />
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -333,6 +372,34 @@ function DashboardPage() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Financial Overview Card */}
+        <div className="summary-card">
+          <div className="summary-card-header">
+            <h4>Financial Overview</h4>
+            <Link to="/finances" className="link-subtle">View Financials →</Link>
+          </div>
+          <div className="summary-metrics-grid">
+            <div className="metric-pill">
+              <span className="metric-name">Income</span>
+              <strong className="metric-val text-success">
+                {financeSummary ? formatCurrency(financeSummary.totalIncome, financeSummary.currency || DEFAULT_CURRENCY) : "—"}
+              </strong>
+            </div>
+            <div className="metric-pill">
+              <span className="metric-name">Expenses</span>
+              <strong className="metric-val text-danger">
+                {financeSummary ? formatCurrency(financeSummary.totalExpenses, financeSummary.currency || DEFAULT_CURRENCY) : "—"}
+              </strong>
+            </div>
+            <div className="metric-pill" style={{ gridColumn: "span 2" }}>
+              <span className="metric-name">Net Cash (Estimated Net)</span>
+              <strong className={`metric-val ${(financeSummary?.netCashFlow ?? 0) >= 0 ? "text-success" : "text-danger"}`}>
+                {financeSummary ? formatCurrency(financeSummary.netCashFlow, financeSummary.currency || DEFAULT_CURRENCY) : "—"}
+              </strong>
+            </div>
+          </div>
         </div>
       </div>
     </div>

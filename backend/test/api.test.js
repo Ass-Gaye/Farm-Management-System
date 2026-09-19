@@ -391,7 +391,223 @@ test("supports full authentication, user isolation, and features lifecycle", asy
   });
   assert.equal(user2Dashboard.status, 404);
 
-  // 11. Cleanup and Deletion
+  // 11. Financial Management (Expenses, Income, Validation, Ownership, Reporting)
+  // 11a. Invalid expense inputs
+  const invalidExpenseAmount = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      amount: -100, // Invalid negative amount
+      category: "Feed",
+      date: "2026-09-18",
+    }),
+  });
+  assert.equal(invalidExpenseAmount.status, 400);
+
+  const invalidExpenseZero = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      amount: 0, // Must be > 0
+      category: "Feed",
+      date: "2026-09-18",
+    }),
+  });
+  assert.equal(invalidExpenseZero.status, 400);
+
+  const invalidExpenseDate = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      amount: 500,
+      category: "Feed",
+      date: "not-a-valid-date",
+    }),
+  });
+  assert.equal(invalidExpenseDate.status, 400);
+
+  // 11b. Tenant isolation: User 2 cannot create expense linked to User 1's house
+  const user2HackedExpense = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders2,
+    body: JSON.stringify({
+      houseId,
+      amount: 1500,
+      category: "Vaccines",
+      date: "2026-09-18",
+    }),
+  });
+  assert.equal(user2HackedExpense.status, 404);
+
+  // 11c. User 1 creates valid expenses
+  const createExpense1 = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      houseId,
+      breedId,
+      category: "Feed",
+      amount: 12000,
+      date: "2026-09-18",
+      description: "Layer mash feed supply 50kg bags",
+    }),
+  });
+  assert.equal(createExpense1.status, 201);
+  assert.equal(createExpense1.body.data.amount, 12000);
+  assert.equal(createExpense1.body.data.category, "Feed");
+  const expenseId1 = createExpense1.body.data.id;
+
+  const createExpense2 = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      category: "Electricity",
+      amount: 3500,
+      date: "2026-09-15",
+      description: "Farm generator fuel and power",
+    }),
+  });
+  assert.equal(createExpense2.status, 201);
+  const expenseId2 = createExpense2.body.data.id;
+
+  // 11d. User 1 creates valid income
+  const createIncome1 = await request("/api/income", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      houseId,
+      category: "Egg sales",
+      amount: 25000,
+      date: "2026-09-18",
+      description: "50 crates sold to local supermarket",
+    }),
+  });
+  assert.equal(createIncome1.status, 201);
+  assert.equal(createIncome1.body.data.amount, 25000);
+  assert.equal(createIncome1.body.data.category, "Egg sales");
+  const incomeId1 = createIncome1.body.data.id;
+
+  const createIncome2 = await request("/api/income", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      category: "Bird sales",
+      amount: 15000,
+      date: "2026-09-16",
+      description: "Live broilers sold to wholesale buyers",
+    }),
+  });
+  assert.equal(createIncome2.status, 201);
+  const incomeId2 = createIncome2.body.data.id;
+
+  // 11e. Tenant isolation: User 2 cannot access, update, or delete User 1's financial records
+  const user2GetExp = await request(`/api/expenses/${expenseId1}`, { headers: authHeaders2 });
+  assert.equal(user2GetExp.status, 404);
+
+  const user2UpdateExp = await request(`/api/expenses/${expenseId1}`, {
+    method: "PUT",
+    headers: authHeaders2,
+    body: JSON.stringify({
+      category: "Feed",
+      amount: 99999,
+      date: "2026-09-18",
+    }),
+  });
+  assert.equal(user2UpdateExp.status, 404);
+
+  const user2DeleteExp = await request(`/api/expenses/${expenseId1}`, {
+    method: "DELETE",
+    headers: authHeaders2,
+  });
+  assert.equal(user2DeleteExp.status, 404);
+
+  const user2GetInc = await request(`/api/income/${incomeId1}`, { headers: authHeaders2 });
+  assert.equal(user2GetInc.status, 404);
+
+  // 11f. User 1 updates expense and income
+  const updateExp1 = await request(`/api/expenses/${expenseId1}`, {
+    method: "PUT",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      houseId,
+      breedId,
+      category: "Feed",
+      amount: 12500, // updated amount
+      date: "2026-09-18",
+      description: "Layer mash feed supply 50kg bags - updated",
+    }),
+  });
+  assert.equal(updateExp1.status, 200);
+  assert.equal(updateExp1.body.data.amount, 12500);
+
+  const updateInc1 = await request(`/api/income/${incomeId1}`, {
+    method: "PUT",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      houseId,
+      category: "Egg sales",
+      amount: 27500, // updated amount
+      date: "2026-09-18",
+      description: "55 crates sold to local supermarket",
+    }),
+  });
+  assert.equal(updateInc1.status, 200);
+  assert.equal(updateInc1.body.data.amount, 27500);
+
+  // 11g. Financial summary calculation verification
+  // Total Income: 27500 + 15000 = 42500
+  // Total Expenses: 12500 + 3500 = 16000
+  // Net Cash Flow: 42500 - 16000 = 26500
+  const finSummary = await request("/api/financial-summary", { headers: authHeaders1 });
+  assert.equal(finSummary.status, 200);
+  assert.equal(finSummary.body.data.currency, "GMD");
+  assert.equal(finSummary.body.data.totalIncome, 42500);
+  assert.equal(finSummary.body.data.totalExpenses, 16000);
+  assert.equal(finSummary.body.data.netCashFlow, 26500);
+  assert.equal(finSummary.body.data.estimatedNet, 26500);
+
+  // 11h. Financial transactions: Unified list, filtering, search
+  const allTransactions = await request("/api/financial-transactions", { headers: authHeaders1 });
+  assert.equal(allTransactions.status, 200);
+  assert.equal(allTransactions.body.data.length, 4);
+
+  const expenseOnly = await request("/api/financial-transactions?type=expense", { headers: authHeaders1 });
+  assert.equal(expenseOnly.status, 200);
+  assert.equal(expenseOnly.body.data.length, 2);
+  assert.equal(expenseOnly.body.data.every((t) => t.type === "Expense"), true);
+
+  const incomeOnly = await request("/api/financial-transactions?type=income", { headers: authHeaders1 });
+  assert.equal(incomeOnly.status, 200);
+  assert.equal(incomeOnly.body.data.length, 2);
+  assert.equal(incomeOnly.body.data.every((t) => t.type === "Income"), true);
+
+  const searchTransactions = await request("/api/financial-transactions?search=crates", { headers: authHeaders1 });
+  assert.equal(searchTransactions.status, 200);
+  assert.equal(searchTransactions.body.data.length, 1);
+  assert.equal(searchTransactions.body.data[0].category, "Egg sales");
+
+  // 11i. Financial Reports: Category breakdown and trends
+  const reports = await request("/api/financial-reports", { headers: authHeaders1 });
+  assert.equal(reports.status, 200);
+  assert.equal(reports.body.data.totalIncome, 42500);
+  assert.equal(reports.body.data.totalExpenses, 16000);
+  assert.ok(reports.body.data.expenseBreakdown.some((c) => c.category === "Feed" && c.total === 12500));
+  assert.ok(reports.body.data.incomeBreakdown.some((c) => c.category === "Egg sales" && c.total === 27500));
+
+  // 11j. Delete financial records
+  const delExp2 = await request(`/api/expenses/${expenseId2}`, {
+    method: "DELETE",
+    headers: authHeaders1,
+  });
+  assert.equal(delExp2.status, 200);
+
+  const delInc2 = await request(`/api/income/${incomeId2}`, {
+    method: "DELETE",
+    headers: authHeaders1,
+  });
+  assert.equal(delInc2.status, 200);
+
+  // 12. Cleanup and Deletion
   const deletePlan = await request(`/api/slaughter-plans/${planId}`, {
     method: "DELETE",
     headers: authHeaders1,

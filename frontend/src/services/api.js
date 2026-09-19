@@ -244,3 +244,98 @@ export const deleteSlaughterPlan = async (planId) => {
     method: "DELETE",
   });
 };
+
+// ==================== Financial Management ====================
+
+export const getFinancialSummary = async (houseId) => {
+  const query = houseId ? `?houseId=${houseId}` : "";
+  return request(`/finances/summary${query}`);
+};
+
+export const getFinancialTransactions = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/finances/transactions${queryString}`);
+};
+
+export const getFinancialReports = async (houseId) => {
+  const query = houseId ? `?houseId=${houseId}` : "";
+  return request(`/finances/reports${query}`);
+};
+
+// Expenses CRUD
+export const getExpenses = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/expenses${queryString}`);
+};
+
+export const getExpenseById = async (id) => {
+  return request(`/expenses/${id}`);
+};
+
+export const createExpense = async (expenseData) => {
+  return request("/expenses", {
+    method: "POST",
+    body: JSON.stringify(expenseData),
+  });
+};
+
+export const updateExpense = async (id, expenseData) => {
+  return request(`/expenses/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(expenseData),
+  });
+};
+
+export const deleteExpense = async (id) => {
+  return request(`/expenses/${id}`, {
+    method: "DELETE",
+  });
+};
+
+// Income CRUD
+export const getIncome = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/income${queryString}`);
+};
+
+export const getIncomeById = async (id) => {
+  return request(`/income/${id}`);
+};
+
+export const createIncome = async (incomeData) => {
+  return request("/income", {
+    method: "POST",
+    body: JSON.stringify(incomeData),
+  });
+};
+
+export const updateIncome = async (id, incomeData) => {
+  return request(`/income/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(incomeData),
+  });
+};
+
+export const deleteIncome = async (id) => {
+  return request(`/income/${id}`, {
+    method: "DELETE",
+  });
+};

@@ -17,6 +17,15 @@ const dashboardRoutes = require("./routes/dashboard.routes");
 const breedRoutes = require("./routes/breed.routes");
 const birdConditionRoutes = require("./routes/birdCondition.routes");
 const slaughterPlanRoutes = require("./routes/slaughterPlan.routes");
+const expenseRoutes = require("./routes/expense.routes");
+const incomeRoutes = require("./routes/income.routes");
+const financeRoutes = require("./routes/finance.routes");
+const { authenticate } = require("./middleware/auth.middleware");
+const {
+  getFinancialSummary,
+  getFinancialTransactions,
+  getFinancialReports,
+} = require("./controllers/finance.controller");
 
 const createApp = () => {
   const app = express();
@@ -58,6 +67,14 @@ const createApp = () => {
   app.use("/api/breeds", breedRoutes);
   app.use("/api/bird-conditions", birdConditionRoutes);
   app.use("/api/slaughter-plans", slaughterPlanRoutes);
+  app.use("/api/expenses", expenseRoutes);
+  app.use("/api/income", incomeRoutes);
+  app.use("/api/finances", financeRoutes);
+
+  // Financial route aliases
+  app.get("/api/financial-summary", authenticate, getFinancialSummary);
+  app.get("/api/financial-transactions", authenticate, getFinancialTransactions);
+  app.get("/api/financial-reports", authenticate, getFinancialReports);
 
   app.use(errorMiddleware);
 

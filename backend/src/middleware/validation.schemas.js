@@ -278,6 +278,160 @@ const updateSlaughterPlanSchema = z.object({
     .nullable(),
 });
 
+// Finance Categories
+const EXPENSE_CATEGORIES = [
+  "Feed",
+  "Medication",
+  "Vaccines",
+  "Labor/staff",
+  "Transportation",
+  "Electricity",
+  "Water",
+  "Equipment",
+  "Repairs",
+  "Poultry house maintenance",
+  "Packaging",
+  "Other",
+];
+
+const INCOME_CATEGORIES = [
+  "Egg sales",
+  "Bird sales",
+  "Manure sales",
+  "Spent/layer bird sales",
+  "Other income",
+];
+
+// Expense Schemas
+const createExpenseSchema = z.object({
+  houseId: z
+    .number()
+    .int("House ID must be a whole number")
+    .positive("House ID must be greater than 0")
+    .optional()
+    .nullable(),
+  breedId: z
+    .number()
+    .int("Breed ID must be a whole number")
+    .positive("Breed ID must be greater than 0")
+    .optional()
+    .nullable(),
+  category: z
+    .string()
+    .trim()
+    .min(1, "Category is required"),
+  amount: z.coerce
+    .number({
+      error: "Amount is required and must be a valid number",
+    })
+    .positive("Amount must be greater than 0"),
+  date: z.coerce.date({
+    error: "Date must be a valid date",
+  }),
+  description: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+});
+
+const updateExpenseSchema = z.object({
+  houseId: z
+    .number()
+    .int("House ID must be a whole number")
+    .positive("House ID must be greater than 0")
+    .optional()
+    .nullable(),
+  breedId: z
+    .number()
+    .int("Breed ID must be a whole number")
+    .positive("Breed ID must be greater than 0")
+    .optional()
+    .nullable(),
+  category: z
+    .string()
+    .trim()
+    .min(1, "Category is required"),
+  amount: z.coerce
+    .number({
+      error: "Amount is required and must be a valid number",
+    })
+    .positive("Amount must be greater than 0"),
+  date: z.coerce.date({
+    error: "Date must be a valid date",
+  }),
+  description: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+});
+
+// Income Schemas
+const createIncomeSchema = z.object({
+  houseId: z
+    .number()
+    .int("House ID must be a whole number")
+    .positive("House ID must be greater than 0")
+    .optional()
+    .nullable(),
+  breedId: z
+    .number()
+    .int("Breed ID must be a whole number")
+    .positive("Breed ID must be greater than 0")
+    .optional()
+    .nullable(),
+  category: z
+    .string()
+    .trim()
+    .min(1, "Category is required"),
+  amount: z.coerce
+    .number({
+      error: "Amount is required and must be a valid number",
+    })
+    .positive("Amount must be greater than 0"),
+  date: z.coerce.date({
+    error: "Date must be a valid date",
+  }),
+  description: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+});
+
+const updateIncomeSchema = z.object({
+  houseId: z
+    .number()
+    .int("House ID must be a whole number")
+    .positive("House ID must be greater than 0")
+    .optional()
+    .nullable(),
+  breedId: z
+    .number()
+    .int("Breed ID must be a whole number")
+    .positive("Breed ID must be greater than 0")
+    .optional()
+    .nullable(),
+  category: z
+    .string()
+    .trim()
+    .min(1, "Category is required"),
+  amount: z.coerce
+    .number({
+      error: "Amount is required and must be a valid number",
+    })
+    .positive("Amount must be greater than 0"),
+  date: z.coerce.date({
+    error: "Date must be a valid date",
+  }),
+  description: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+});
+
 // Param Schemas
 const idParamSchema = z.object({
   id: z.coerce.number().int().positive(),
@@ -299,6 +453,12 @@ module.exports = {
   updateBirdConditionSchema,
   createSlaughterPlanSchema,
   updateSlaughterPlanSchema,
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+  createExpenseSchema,
+  updateExpenseSchema,
+  createIncomeSchema,
+  updateIncomeSchema,
   idParamSchema,
   houseIdParamSchema,
 };
