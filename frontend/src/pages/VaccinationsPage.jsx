@@ -3,13 +3,15 @@ import { useSearchParams } from "react-router-dom";
 import { useFarm } from "../context/useFarm";
 import PageHeader from "../components/common/PageHeader";
 import EmptyState from "../components/common/EmptyState";
-import { PlusIcon, VaccineIcon } from "../components/Icons";
+import { PlusIcon } from "../components/Icons";
 import VaccinationModal from "../components/VaccinationModal";
 import { applyVaccinationTemplate } from "../services/api";
 
 function VaccinationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlFlockId = searchParams.get("flockId");
+
+  const [todayThreshold] = useState(() => Date.now() - 24 * 60 * 60 * 1000);
 
   const { vaccinations, flocks, selectedHouse, reloadHouseData, showToast, setConfirmDialog } =
     useFarm();
@@ -245,7 +247,7 @@ function VaccinationsPage() {
                   {filteredVaccinations.map((vacc) => {
                     const isOverdue =
                       vacc.status === "PENDING" &&
-                      new Date(vacc.scheduledDate).getTime() < Date.now() - 24 * 60 * 60 * 1000;
+                      new Date(vacc.scheduledDate).getTime() < todayThreshold;
 
                     const statusClass =
                       vacc.status === "COMPLETED"
