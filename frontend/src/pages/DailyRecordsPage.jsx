@@ -5,6 +5,8 @@ import PageHeader from "../components/common/PageHeader";
 import EmptyState from "../components/common/EmptyState";
 import { PlusIcon } from "../components/Icons";
 
+import { exportToCsv } from "../utils/exportCsv";
+
 function DailyRecordsPage() {
   const navigate = useNavigate();
   const { records, selectedHouse, setConfirmDialog } = useFarm();
@@ -36,6 +38,33 @@ function DailyRecordsPage() {
     0
   );
 
+  const handleExportCsv = () => {
+    const headers = [
+      "Date",
+      "House",
+      "Flock / Batch",
+      "Mortality",
+      "Feed Used (kg)",
+      "Feed Variety",
+      "Eggs Collected",
+      "Avg Bird Weight (g)",
+    ];
+
+    const rows = filteredAndSortedRecords.map((r) => [
+      new Date(r.date).toISOString().split("T")[0],
+      r.house?.name || selectedHouse?.name || "",
+      r.flock?.name || "Whole House",
+      r.mortality ?? 0,
+      r.feedUsedKg ?? 0,
+      r.feedType?.name || "",
+      r.eggsCollected ?? 0,
+      r.avgWeightGrams ?? "",
+    ]);
+
+    const houseSlug = (selectedHouse?.name || "farm").toLowerCase().replace(/\s+/g, "_");
+    exportToCsv(`daily_records_${houseSlug}_${new Date().toISOString().split("T")[0]}.csv`, headers, rows);
+  };
+
   return (
     <div className="daily-records-page">
       <PageHeader
@@ -43,13 +72,24 @@ function DailyRecordsPage() {
         title="Daily Production Records"
         description="Track mortality, feed usage in kilograms, and daily eggs collected."
         actions={
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => navigate("/daily-records/new")}
-          >
-            <PlusIcon size={14} /> Add Daily Record
-          </button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleExportCsv}
+              disabled={filteredAndSortedRecords.length === 0}
+              title="Export filtered records to CSV"
+            >
+              📥 Export CSV
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => navigate("/daily-records/new")}
+            >
+              <PlusIcon size={14} /> Add Daily Record
+            </button>
+          </div>
         }
       />
 

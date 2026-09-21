@@ -4,6 +4,7 @@ import { useFarm } from "../context/useFarm";
 import PageHeader from "../components/common/PageHeader";
 import EmptyState from "../components/common/EmptyState";
 import { PlusIcon, VaccineIcon } from "../components/Icons";
+import { exportToCsv } from "../utils/exportCsv";
 
 function FlocksPage() {
   const navigate = useNavigate();
@@ -32,6 +33,53 @@ function FlocksPage() {
   const avgMortalityRate =
     totalBirdsPlaced > 0 ? ((totalActiveMortality / totalBirdsPlaced) * 100).toFixed(1) : "0.0";
 
+  const handleExportCsv = () => {
+    const headers = [
+      "Flock Name",
+      "Batch Number",
+      "House",
+      "Breed",
+      "Purpose",
+      "Status",
+      "Birds Placed",
+      "Current Live Birds",
+      "Total Mortality",
+      "Mortality Rate (%)",
+      "Age",
+      "Total Feed Used (kg)",
+      "Latest Avg Weight (g)",
+      "FCR",
+      "Total Eggs",
+      "Latest Laying Rate (%)",
+      "Placement Date",
+      "Expected Market Date",
+    ];
+
+    const rows = filteredFlocks.map((f) => [
+      f.name,
+      f.batchNumber || "",
+      f.houseName || selectedHouse?.name || "",
+      f.breedName || "",
+      f.purpose,
+      f.status,
+      f.birdsPlaced,
+      f.currentBirds,
+      f.totalMortality,
+      f.mortalityRate,
+      f.age?.formatted || "",
+      f.totalFeedUsedKg,
+      f.latestAvgWeightGrams || "",
+      f.fcr ?? "",
+      f.totalEggs,
+      f.latestLayingRate !== null ? `${f.latestLayingRate}%` : "",
+      new Date(f.placementDate).toISOString().split("T")[0],
+      f.expectedMarketDate ? new Date(f.expectedMarketDate).toISOString().split("T")[0] : "",
+    ]);
+
+    const houseSlug = (selectedHouse?.name || "farm").toLowerCase().replace(/\s+/g, "_");
+    exportToCsv(`flocks_summary_${houseSlug}_${new Date().toISOString().split("T")[0]}.csv`, headers, rows);
+  };
+
   return (
     <div className="flocks-page">
       <PageHeader
@@ -39,13 +87,24 @@ function FlocksPage() {
         title="Flock & Batch Management"
         description="Track biological groups of birds, manage growth cycles, mortality rates, FCR, and laying percentages."
         actions={
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => navigate("/flocks/new")}
-          >
-            <PlusIcon size={14} /> New Flock / Batch
-          </button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleExportCsv}
+              disabled={filteredFlocks.length === 0}
+              title="Export flocks to CSV"
+            >
+              📥 Export CSV
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => navigate("/flocks/new")}
+            >
+              <PlusIcon size={14} /> New Flock / Batch
+            </button>
+          </div>
         }
       />
 
