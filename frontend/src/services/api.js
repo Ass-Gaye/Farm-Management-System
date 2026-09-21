@@ -88,6 +88,20 @@ export const changePassword = async ({ currentPassword, newPassword }) => {
   });
 };
 
+export const forgotPassword = async ({ email }) => {
+  return request("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+};
+
+export const resetPassword = async ({ token, newPassword }) => {
+  return request("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, newPassword }),
+  });
+};
+
 export const logoutUser = () => {
   removeAuthToken();
 };

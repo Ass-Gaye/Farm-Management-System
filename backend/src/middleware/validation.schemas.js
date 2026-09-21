@@ -41,6 +41,22 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(6, "New password must be at least 6 characters"),
 });
 
+const forgotPasswordSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .email("Please provide a valid email address"),
+});
+
+const resetPasswordSchema = z.object({
+  token: z
+    .string()
+    .min(10, "Password reset token is required"),
+  newPassword: z
+    .string()
+    .min(6, "New password must be at least 6 characters"),
+});
+
 // House Schemas
 const createHouseSchema = z.object({
   name: z
@@ -1174,6 +1190,8 @@ module.exports = {
   loginSchema,
   updateProfileSchema,
   changePasswordSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
   createHouseSchema,
   createDailyRecordSchema,
   updateDailyRecordSchema,

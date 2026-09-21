@@ -213,11 +213,112 @@ const changePassword = async (req, res, next) => {
   }
 };
 
+/**
+ * Initiates a password reset request.
+ * Generates a signed token valid for 1 hour.
+ */
+const forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    // If user not found, return generic success message to prevent user enumeration
+    if (!user) {
+      return res.json({
+        success: true,
+        message: "If an account with that email exists, password reset instructions have been generated.",
+      });
+    }
+
+    // Generate a single-use, 1-hour reset token signed with JWT_SECRET + user.password
+    // Once the user's password changes, the secret changes and the token is automatically invalidated!
+    const secret = `${JWT_SECRET}-${user.password}`;
+    const resetToken = jwt.sign(
+      { userId: user.id, email: user.email, purpose: "reset_password" },
+      secret,
+      { expiresIn: "1h" }
+    );
+
+    res.json({
+      success: true,
+      message: "Password reset token generated successfully. Valid for 1 hour.",
+      data: {
+        resetToken,
+        email: user.email,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Resets user password using the verified reset token.
+ */
+const resetPassword = async (req, res, next) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    const decoded = jwt.decode(token);
+    if (!decoded || !decoded.userId || decoded.purpose !== "reset_password") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or malformed password reset token",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User account not found",
+      });
+    }
+
+    try {
+      const secret = `${JWT_SECRET}-${user.password}`;
+      jwt.verify(token, secret);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        message:
+          err.name === "TokenExpiredError"
+            ? "Password reset token has expired. Please request a new one."
+            : "Password reset token is invalid or has already been used.",
+      });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { password: hashedPassword },
+    });
+
+    res.json({
+      success: true,
+      message: "Password has been reset successfully. You can now log in.",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   login,
   getMe,
   updateProfile,
   changePassword,
+  forgotPassword,
+  resetPassword,
 };
 
