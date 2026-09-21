@@ -75,11 +75,11 @@ function FinancePage() {
   const [typeFilter, setTypeFilter] = useState("all"); // "all" | "Expense" | "Income"
   const [categoryFilter, setCategoryFilter] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("");
-  const [houseFilter, setHouseFilter] = useState(selectedHouse?.id ? String(selectedHouse.id) : "");
+  const [houseFilter] = useState(selectedHouse?.id ? String(selectedHouse.id) : "");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortOrder, setSortOrder] = useState("desc");
+  const [sortOrder] = useState("desc");
 
   // Filter state for reports
   const [reportDateRange, setReportDateRange] = useState("month"); // "today" | "week" | "month" | "last_month" | "year" | "custom"
@@ -204,6 +204,18 @@ function FinancePage() {
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
 
+    if (deleteTarget.type === "Supplier" && deleteTarget.outstanding > 0) {
+      showToast(
+        `Cannot delete supplier "${deleteTarget.name}" while an outstanding balance of ${formatCurrency(
+          deleteTarget.outstanding,
+          currency
+        )} exists. Please settle all payables before deleting.`,
+        "error"
+      );
+      setDeleteTarget(null);
+      return;
+    }
+
     try {
       setDeleting(true);
       if (deleteTarget.type === "Expense") {
@@ -223,6 +235,7 @@ function FinancePage() {
       loadFinanceData();
     } catch (err) {
       showToast(err.message || "Failed to delete item.", "error");
+      setDeleteTarget(null);
     } finally {
       setDeleting(false);
     }
@@ -1853,8 +1866,19 @@ function FinancePage() {
                         <button
                           type="button"
                           className="table-action-button text-danger"
-                          onClick={() => setDeleteTarget({ type: "Supplier", id: supp.id, name: supp.name })}
-                          title="Delete Supplier"
+                          onClick={() =>
+                            setDeleteTarget({
+                              type: "Supplier",
+                              id: supp.id,
+                              name: supp.name,
+                              outstanding: Number(supp.outstandingPayables || 0),
+                            })
+                          }
+                          title={
+                            Number(supp.outstandingPayables || 0) > 0
+                              ? "Cannot delete supplier with outstanding debt"
+                              : "Delete Supplier"
+                          }
                         >
                           <TrashIcon size={14} />
                         </button>
@@ -2189,9 +2213,17 @@ function FinancePage() {
       {deleteTarget && (
         <ConfirmDialog
           title={`Delete ${deleteTarget.type}?`}
-          message={`Are you sure you want to delete this ${deleteTarget.type.toLowerCase()} record (${
-            deleteTarget.name || deleteTarget.category || formatCurrency(deleteTarget.amount, currency)
-          })? This cannot be undone.`}
+          message={
+            deleteTarget.type === "Supplier" && deleteTarget.outstanding > 0
+              ? `Cannot delete supplier "${deleteTarget.name}" while an outstanding balance of ${formatCurrency(
+                  deleteTarget.outstanding,
+                  currency
+                )} exists. Outstanding payables must be fully settled before this supplier can be removed.`
+              : `Are you sure you want to delete this ${deleteTarget.type.toLowerCase()} record (${
+                  deleteTarget.name || deleteTarget.category || formatCurrency(deleteTarget.amount, currency)
+                })? This cannot be undone.`
+          }
+          confirmDisabled={deleteTarget.type === "Supplier" && deleteTarget.outstanding > 0}
           onCancel={() => setDeleteTarget(null)}
           onConfirm={handleDeleteConfirm}
           loading={deleting}

@@ -7,10 +7,16 @@ import {
   HealthIcon,
   SlaughterIcon,
   FinanceIcon,
+  InventoryIcon,
+  FlockIcon,
+  VaccineIcon,
 } from "../Icons";
 
 function PageNavigation() {
-  const { records, breeds, conditions, slaughterPlans } = useFarm();
+  const { records, breeds, conditions, slaughterPlans, flocks, vaccinations } = useFarm();
+
+  const pendingVaccinationsCount =
+    vaccinations?.filter((v) => v.status === "PENDING").length || 0;
 
   const navItems = [
     {
@@ -20,10 +26,22 @@ function PageNavigation() {
       badge: null,
     },
     {
+      to: "/flocks",
+      label: "Flocks & Batches",
+      icon: <FlockIcon size={15} />,
+      badge: flocks?.length || 0,
+    },
+    {
       to: "/daily-records",
       label: "Daily Records",
       icon: <RecordsIcon size={15} />,
       badge: records.length,
+    },
+    {
+      to: "/vaccinations",
+      label: "Vaccinations",
+      icon: <VaccineIcon size={15} />,
+      badge: pendingVaccinationsCount > 0 ? pendingVaccinationsCount : null,
     },
     {
       to: "/breeds",
@@ -42,6 +60,12 @@ function PageNavigation() {
       label: "Slaughter Planning",
       icon: <SlaughterIcon size={15} />,
       badge: slaughterPlans.length,
+    },
+    {
+      to: "/inventory",
+      label: "Inventory & Feed",
+      icon: <InventoryIcon size={15} />,
+      badge: null,
     },
     {
       to: "/finances",

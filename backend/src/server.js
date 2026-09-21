@@ -6,6 +6,7 @@
  */
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 require("dotenv").config();
 
 const errorMiddleware = require("./middleware/error.middleware");
@@ -22,6 +23,10 @@ const incomeRoutes = require("./routes/income.routes");
 const customerRoutes = require("./routes/customer.routes");
 const supplierRoutes = require("./routes/supplier.routes");
 const financeRoutes = require("./routes/finance.routes");
+const feedTypeRoutes = require("./routes/feedType.routes");
+const inventoryRoutes = require("./routes/inventory.routes");
+const flockRoutes = require("./routes/flock.routes");
+const vaccinationRoutes = require("./routes/vaccination.routes");
 const { authenticate } = require("./middleware/auth.middleware");
 const {
   getFinancialSummary,
@@ -31,6 +36,7 @@ const {
 
 const createApp = () => {
   const app = express();
+  app.use(helmet());
   const allowedOrigins = process.env.CORS_ORIGIN
     ?.split(",")
     .map((origin) => origin.trim())
@@ -52,7 +58,7 @@ const createApp = () => {
           : undefined
     )
   );
-  app.use(express.json());
+  app.use(express.json({ limit: "1mb" }));
 
   app.get("/api/health", (req, res) => {
     res.json({
@@ -74,6 +80,10 @@ const createApp = () => {
   app.use("/api/customers", customerRoutes);
   app.use("/api/suppliers", supplierRoutes);
   app.use("/api/finances", financeRoutes);
+  app.use("/api/feed-types", feedTypeRoutes);
+  app.use("/api/inventory", inventoryRoutes);
+  app.use("/api/flocks", flockRoutes);
+  app.use("/api/vaccinations", vaccinationRoutes);
 
   // Financial route aliases
   app.get("/api/financial-summary", authenticate, getFinancialSummary);

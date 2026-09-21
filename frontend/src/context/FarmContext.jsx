@@ -10,11 +10,15 @@ import {
   getBreeds,
   getBirdConditions,
   getSlaughterPlans,
+  getFlocks,
+  getVaccinations,
   deleteHouse,
   deleteDailyRecord,
   deleteBreed,
   deleteBirdCondition,
   deleteSlaughterPlan,
+  deleteFlock,
+  deleteVaccination,
   toggleSlaughterPlanComplete,
 } from "../services/api";
 
@@ -31,6 +35,8 @@ export function FarmProvider({ children }) {
   const [breeds, setBreeds] = useState([]);
   const [conditions, setConditions] = useState([]);
   const [slaughterPlans, setSlaughterPlans] = useState([]);
+  const [flocks, setFlocks] = useState([]);
+  const [vaccinations, setVaccinations] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -102,20 +108,31 @@ export function FarmProvider({ children }) {
 
     try {
       setError("");
-      const [dashboardRes, recordsRes, breedsRes, conditionsRes, slaughterRes] =
-        await Promise.all([
-          getHouseDashboard(houseId),
-          getDailyRecords(houseId),
-          getBreeds(houseId),
-          getBirdConditions(houseId),
-          getSlaughterPlans(houseId),
-        ]);
+      const [
+        dashboardRes,
+        recordsRes,
+        breedsRes,
+        conditionsRes,
+        slaughterRes,
+        flocksRes,
+        vaccinationsRes,
+      ] = await Promise.all([
+        getHouseDashboard(houseId),
+        getDailyRecords(houseId),
+        getBreeds(houseId),
+        getBirdConditions(houseId),
+        getSlaughterPlans(houseId),
+        getFlocks(houseId),
+        getVaccinations(),
+      ]);
 
       setDashboard(dashboardRes.data);
       setRecords(recordsRes.data || []);
       setBreeds(breedsRes.data || []);
       setConditions(conditionsRes.data || []);
       setSlaughterPlans(slaughterRes.data || []);
+      setFlocks(flocksRes.data || []);
+      setVaccinations(vaccinationsRes.data || []);
     } catch (err) {
       setError(err.message || "Failed to load farm house data.");
     }
@@ -142,6 +159,8 @@ export function FarmProvider({ children }) {
           setBreeds([]);
           setConditions([]);
           setSlaughterPlans([]);
+          setFlocks([]);
+          setVaccinations([]);
           localStorage.removeItem(SELECTED_HOUSE_KEY);
           return;
         }
@@ -356,6 +375,44 @@ export function FarmProvider({ children }) {
     [reloadHouseData, showToast]
   );
 
+  // Delete Flock
+  const deleteFlockHandler = useCallback(
+    async (flockId) => {
+      try {
+        setActionLoading(true);
+        setError("");
+        await deleteFlock(flockId);
+        await reloadHouseData();
+        showToast("Flock batch removed.");
+      } catch (err) {
+        setError(err.message || "Failed to delete flock.");
+      } finally {
+        setActionLoading(false);
+        setConfirmDialog(null);
+      }
+    },
+    [reloadHouseData, showToast]
+  );
+
+  // Delete Vaccination
+  const deleteVaccinationHandler = useCallback(
+    async (vaccinationId) => {
+      try {
+        setActionLoading(true);
+        setError("");
+        await deleteVaccination(vaccinationId);
+        await reloadHouseData();
+        showToast("Vaccination record removed.");
+      } catch (err) {
+        setError(err.message || "Failed to delete vaccination.");
+      } finally {
+        setActionLoading(false);
+        setConfirmDialog(null);
+      }
+    },
+    [reloadHouseData, showToast]
+  );
+
   const currentBirdsInHouse =
     dashboard?.statistics?.currentBirds ?? selectedHouse?.birdsPlaced ?? 0;
 
@@ -375,6 +432,8 @@ export function FarmProvider({ children }) {
     breeds,
     conditions,
     slaughterPlans,
+    flocks,
+    vaccinations,
     currentBirdsInHouse,
     loading,
     error,
@@ -393,6 +452,8 @@ export function FarmProvider({ children }) {
     deleteConditionHandler,
     deleteSlaughterHandler,
     toggleSlaughterCompleteHandler,
+    deleteFlockHandler,
+    deleteVaccinationHandler,
   };
 
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;

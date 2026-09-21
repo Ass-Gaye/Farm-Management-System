@@ -121,8 +121,103 @@ const getMe = async (req, res) => {
   });
 };
 
+/**
+ * Updates the user's name or email.
+ */
+const updateProfile = async (req, res, next) => {
+  try {
+    const { name, email } = req.body;
+    const updateData = {};
+
+    if (name) {
+      updateData.name = name.trim();
+    }
+
+    if (email) {
+      const normalizedEmail = email.toLowerCase().trim();
+      if (normalizedEmail !== req.user.email) {
+        const existing = await prisma.user.findUnique({
+          where: { email: normalizedEmail },
+        });
+        if (existing) {
+          return res.status(409).json({
+            success: false,
+            message: "An account with this email already exists",
+          });
+        }
+        updateData.email = normalizedEmail;
+      }
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user.id },
+      data: updateData,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        createdAt: true,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "Profile updated successfully",
+      data: updatedUser,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Changes user password after verifying the current password.
+ */
+const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password is incorrect",
+      });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { password: hashedPassword },
+    });
+
+    res.json({
+      success: true,
+      message: "Password changed successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   login,
   getMe,
+  updateProfile,
+  changePassword,
 };
+

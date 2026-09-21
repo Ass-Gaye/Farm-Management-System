@@ -15,10 +15,14 @@ model User {
   name      String
   createdAt DateTime       @default(now())
   houses    PoultryHouse[]
+  flocks    Flock[]
+  vaccinations Vaccination[]
   expenses  Expense[]
   income    Income[]
   customers Customer[]
   suppliers Supplier[]
+  feedTypes FeedType[]
+  inventoryMovements InventoryMovement[]
 
   @@map("users")
 }
@@ -29,12 +33,14 @@ model PoultryHouse {
   name           String
   birdsPlaced    Int
   createdAt      DateTime        @default(now())
+  flocks         Flock[]
   dailyRecords   DailyRecord[]
   breeds         Breed[]
   birdConditions BirdCondition[]
   slaughterPlans SlaughterPlan[]
   expenses       Expense[]
   income         Income[]
+  inventoryMovements InventoryMovement[]
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -44,17 +50,25 @@ model PoultryHouse {
 model DailyRecord {
   id            Int          @id @default(autoincrement())
   houseId       Int
+  flockId       Int?
   date          DateTime
   mortality     Int          @default(0)
   feedUsedKg    Float        @default(0)
   eggsCollected Int          @default(0)
+  avgWeightGrams Float?
+  feedTypeId    Int?
   createdAt     DateTime     @default(now())
 
   // A house deletion removes its dependent production history.
   house         PoultryHouse @relation(fields: [houseId], references: [id], onDelete: Cascade)
+  flock         Flock?       @relation(fields: [flockId], references: [id], onDelete: SetNull)
+  feedType      FeedType?    @relation(fields: [feedTypeId], references: [id], onDelete: SetNull)
+  inventoryMovements InventoryMovement[]
 
   // The API treats one record per house and date as the daily grain.
   @@unique([houseId, date])
+  @@index([flockId])
+  @@index([feedTypeId])
   @@map("daily_records")
 }
 
@@ -68,6 +82,7 @@ model Breed {
   createdAt      DateTime        @default(now())
 
   house          PoultryHouse    @relation(fields: [houseId], references: [id], onDelete: Cascade)
+  flocks         Flock[]
   birdConditions BirdCondition[]
   slaughterPlans SlaughterPlan[]
   expenses       Expense[]
@@ -79,6 +94,7 @@ model Breed {
 model BirdCondition {
   id               Int          @id @default(autoincrement())
   houseId          Int
+  flockId          Int?
   breedId          Int?
   healthy          Int          @default(0)
   sick             Int          @default(0)
@@ -89,14 +105,17 @@ model BirdCondition {
   createdAt        DateTime     @default(now())
 
   house            PoultryHouse @relation(fields: [houseId], references: [id], onDelete: Cascade)
+  flock            Flock?       @relation(fields: [flockId], references: [id], onDelete: SetNull)
   breed            Breed?       @relation(fields: [breedId], references: [id], onDelete: SetNull)
 
+  @@index([flockId])
   @@map("bird_conditions")
 }
 
 model SlaughterPlan {
   id                    Int          @id @default(autoincrement())
   houseId               Int
+  flockId               Int?
   breedId               Int?
   numberOfBirds         Int
   placementDate         DateTime
@@ -106,8 +125,10 @@ model SlaughterPlan {
   createdAt             DateTime     @default(now())
 
   house                 PoultryHouse @relation(fields: [houseId], references: [id], onDelete: Cascade)
+  flock                 Flock?       @relation(fields: [flockId], references: [id], onDelete: SetNull)
   breed                 Breed?       @relation(fields: [breedId], references: [id], onDelete: SetNull)
 
+  @@index([flockId])
   @@map("slaughter_plans")
 }
 
@@ -154,8 +175,10 @@ model Expense {
   id            Int           @id @default(autoincrement())
   userId        Int
   houseId       Int?
+  flockId       Int?
   breedId       Int?
   supplierId    Int?
+  feedTypeId    Int?
   category      String
   amount        Decimal       @db.Decimal(12, 2)
   date          DateTime
@@ -171,12 +194,17 @@ model Expense {
 
   user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   house         PoultryHouse? @relation(fields: [houseId], references: [id], onDelete: SetNull)
+  flock         Flock?        @relation(fields: [flockId], references: [id], onDelete: SetNull)
   breed         Breed?        @relation(fields: [breedId], references: [id], onDelete: SetNull)
   supplier      Supplier?     @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  feedType      FeedType?     @relation(fields: [feedTypeId], references: [id], onDelete: SetNull)
+  inventoryMovements InventoryMovement[]
 
   @@index([userId, date])
   @@index([houseId])
+  @@index([flockId])
   @@index([supplierId])
+  @@index([feedTypeId])
   @@map("expenses")
 }
 
@@ -184,6 +212,7 @@ model Income {
   id            Int           @id @default(autoincrement())
   userId        Int
   houseId       Int?
+  flockId       Int?
   breedId       Int?
   customerId    Int?
   category      String
@@ -201,11 +230,128 @@ model Income {
 
   user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   house         PoultryHouse? @relation(fields: [houseId], references: [id], onDelete: SetNull)
+  flock         Flock?        @relation(fields: [flockId], references: [id], onDelete: SetNull)
   breed         Breed?        @relation(fields: [breedId], references: [id], onDelete: SetNull)
   customer      Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@index([userId, date])
   @@index([houseId])
+  @@index([flockId])
   @@index([customerId])
   @@map("income")
+}
+
+model FeedType {
+  id           Int                 @id @default(autoincrement())
+  userId       Int
+  name         String
+  category     String              @default("FEED")
+  description  String?
+  unit         String              @default("kg")
+  bagWeightKg  Float?              @default(50)
+  minimumStock Decimal             @default(0) @db.Decimal(12, 2)
+  currentStock Decimal             @default(0) @db.Decimal(12, 2)
+  unitCost     Decimal             @default(0) @db.Decimal(12, 2)
+  active       Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movements    InventoryMovement[]
+  expenses     Expense[]
+  dailyRecords DailyRecord[]
+
+  @@index([userId])
+  @@index([userId, category])
+  @@map("feed_types")
+}
+
+model InventoryMovement {
+  id            Int           @id @default(autoincrement())
+  userId        Int
+  feedTypeId    Int
+  houseId       Int?
+  dailyRecordId Int?
+  expenseId     Int?
+  type          String        // PURCHASE, CONSUMPTION, ADJUSTMENT, WASTAGE, RETURN
+  quantity      Decimal       @db.Decimal(12, 2)
+  unit          String
+  unitCost      Decimal?      @db.Decimal(12, 2)
+  totalCost     Decimal?      @db.Decimal(12, 2)
+  balanceAfter  Decimal       @db.Decimal(12, 2)
+  date          DateTime
+  reason        String?
+  createdAt     DateTime      @default(now())
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feedType      FeedType      @relation(fields: [feedTypeId], references: [id], onDelete: Cascade)
+  house         PoultryHouse? @relation(fields: [houseId], references: [id], onDelete: SetNull)
+  dailyRecord   DailyRecord?  @relation(fields: [dailyRecordId], references: [id], onDelete: SetNull)
+  expense       Expense?      @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+
+  @@index([userId, date])
+  @@index([feedTypeId])
+  @@index([houseId])
+  @@index([type])
+  @@map("inventory_movements")
+}
+
+model Flock {
+  id                  Int             @id @default(autoincrement())
+  userId              Int
+  houseId             Int
+  breedId             Int?
+  name                String
+  batchNumber         String?
+  purpose             String          @default("BROILER") // BROILER, LAYER, BREEDER, DUAL_PURPOSE, OTHER
+  birdsPlaced         Int
+  currentBirds        Int
+  placementDate       DateTime
+  expectedMarketDate  DateTime?
+  targetWeightKg      Float?
+  status              String          @default("ACTIVE") // ACTIVE, COMPLETED, SOLD, SLAUGHTERED, ARCHIVED
+  notes               String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  house               PoultryHouse    @relation(fields: [houseId], references: [id], onDelete: Cascade)
+  breed               Breed?          @relation(fields: [breedId], references: [id], onDelete: SetNull)
+  dailyRecords        DailyRecord[]
+  birdConditions      BirdCondition[]
+  slaughterPlans      SlaughterPlan[]
+  vaccinations        Vaccination[]
+  expenses            Expense[]
+  income              Income[]
+
+  @@index([userId])
+  @@index([houseId])
+  @@index([status])
+  @@map("flocks")
+}
+
+model Vaccination {
+  id               Int          @id @default(autoincrement())
+  userId           Int
+  flockId          Int
+  vaccineName      String
+  disease          String?
+  targetAgeDays    Int?
+  scheduledDate    DateTime
+  administeredDate DateTime?
+  status           String       @default("PENDING") // PENDING, COMPLETED, MISSED
+  dosage           String?
+  administeredBy   String?
+  cost             Decimal?     @default(0) @db.Decimal(12, 2)
+  notes            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flock            Flock        @relation(fields: [flockId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([flockId])
+  @@index([status])
+  @@map("vaccinations")
 }

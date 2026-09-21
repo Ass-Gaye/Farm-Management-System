@@ -280,6 +280,135 @@
   cursor: not-allowed;
 }
 
+/* Common button utility classes mapped to system design tokens */
+.btn {
+  border: 1px solid transparent;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: inherit;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn-primary {
+  border-color: var(--pine-700);
+  background: var(--pine-800);
+  color: var(--text-inverse);
+  box-shadow: 0 1px 2px rgba(19, 36, 26, 0.08);
+}
+
+.btn-primary:hover {
+  background: var(--pine-700);
+  border-color: var(--pine-600);
+}
+
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-secondary {
+  border-color: var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-surface-subtle);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  border-color: var(--alert-danger-border);
+  background: var(--bg-surface);
+  color: var(--alert-danger);
+}
+
+.btn-danger:hover {
+  background: var(--alert-danger-bg);
+  border-color: var(--alert-danger);
+}
+
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.btn-icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+
+.btn-icon:hover {
+  border-color: var(--pine-500);
+  background: var(--pine-50);
+  color: var(--pine-800);
+}
+
+.btn-icon.text-danger:hover {
+  border-color: var(--alert-danger);
+  background: var(--alert-danger-bg);
+  color: var(--alert-danger);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.alert-banner {
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 16px;
+}
+
+.alert-banner.alert-error {
+  background: var(--alert-danger-bg);
+  color: var(--alert-danger);
+  border: 1px solid var(--alert-danger-border);
+}
+
+.alert-banner.alert-warning {
+  background: var(--alert-amber-bg);
+  color: var(--alert-amber);
+  border: 1px solid var(--alert-amber-border);
+}
+
+.alert-banner.alert-success {
+  background: var(--alert-success-bg);
+  color: var(--alert-success);
+  border: 1px solid var(--alert-success-border);
+}
+
 /* ==========================================================================
    Main Layout & Operational Container
    ========================================================================== */

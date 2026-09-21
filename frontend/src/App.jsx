@@ -17,6 +17,10 @@ import SlaughterPlanningPage from "./pages/SlaughterPlanningPage";
 import SlaughterPlanFormPage from "./pages/SlaughterPlanFormPage";
 import HouseFormPage from "./pages/HouseFormPage";
 import FinancePage from "./pages/FinancePage";
+import InventoryPage from "./pages/InventoryPage";
+import FlocksPage from "./pages/FlocksPage";
+import FlockFormPage from "./pages/FlockFormPage";
+import VaccinationsPage from "./pages/VaccinationsPage";
 
 import "./App.css";
 
@@ -51,27 +55,38 @@ function AppContent() {
         {/* 1. Dashboard */}
         <Route path="/dashboard" element={<DashboardPage />} />
 
-        {/* 2. Daily Records */}
+        {/* 2. Flocks / Batches */}
+        <Route path="/flocks" element={<FlocksPage />} />
+        <Route path="/flocks/new" element={<FlockFormPage />} />
+        <Route path="/flocks/:id/edit" element={<FlockFormPage />} />
+
+        {/* 3. Daily Records */}
         <Route path="/daily-records" element={<DailyRecordsPage />} />
         <Route path="/daily-records/new" element={<DailyRecordFormPage />} />
         <Route path="/daily-records/:id/edit" element={<DailyRecordFormPage />} />
 
-        {/* 3. Bird Breeds */}
+        {/* 4. Vaccinations */}
+        <Route path="/vaccinations" element={<VaccinationsPage />} />
+
+        {/* 5. Bird Breeds */}
         <Route path="/breeds" element={<BreedsPage />} />
         <Route path="/breeds/new" element={<BreedFormPage />} />
         <Route path="/breeds/:id/edit" element={<BreedFormPage />} />
 
-        {/* 4. Health & Condition */}
+        {/* 6. Health & Condition */}
         <Route path="/health-condition" element={<HealthConditionPage />} />
         <Route path="/health-condition/new" element={<HealthConditionFormPage />} />
         <Route path="/health-condition/:id/edit" element={<HealthConditionFormPage />} />
 
-        {/* 5. Slaughter Planning */}
+        {/* 7. Slaughter Planning */}
         <Route path="/slaughter-planning" element={<SlaughterPlanningPage />} />
         <Route path="/slaughter-planning/new" element={<SlaughterPlanFormPage />} />
         <Route path="/slaughter-planning/:id/edit" element={<SlaughterPlanFormPage />} />
 
-        {/* 6. Financial Management */}
+        {/* 8. Inventory & Feed Management */}
+        <Route path="/inventory" element={<InventoryPage />} />
+
+        {/* 9. Financial Management */}
         <Route path="/finances" element={<FinancePage />} />
 
         {/* Poultry House Management */}
@@ -82,10 +97,13 @@ function AppContent() {
         <Route path="/houses/:houseId" element={<HouseRouteSync />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />
+          <Route path="flocks" element={<FlocksPage />} />
           <Route path="daily-records" element={<DailyRecordsPage />} />
+          <Route path="vaccinations" element={<VaccinationsPage />} />
           <Route path="breeds" element={<BreedsPage />} />
           <Route path="health-condition" element={<HealthConditionPage />} />
           <Route path="slaughter-planning" element={<SlaughterPlanningPage />} />
+          <Route path="inventory" element={<InventoryPage />} />
           <Route path="finances" element={<FinancePage />} />
         </Route>
 

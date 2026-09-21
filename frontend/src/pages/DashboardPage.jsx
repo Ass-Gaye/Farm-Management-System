@@ -9,8 +9,11 @@ import {
   AlertTriangleIcon,
   ArrowRightIcon,
   FinanceIcon,
+  InventoryIcon,
+  FlockIcon,
+  VaccineIcon,
 } from "../components/Icons";
-import { getFinancialSummary } from "../services/api";
+import { getFinancialSummary, getInventorySummary } from "../services/api";
 import { formatCurrency, DEFAULT_CURRENCY } from "../services/currency";
 
 function DashboardPage() {
@@ -20,11 +23,14 @@ function DashboardPage() {
     dashboard,
     breeds,
     records,
+    flocks = [],
+    vaccinations = [],
     setConfirmDialog,
     actionLoading,
   } = useFarm();
 
   const [financeSummary, setFinanceSummary] = useState(null);
+  const [inventorySummary, setInventorySummary] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +45,19 @@ function DashboardPage() {
       }
     };
     fetchFinances();
+
+    const fetchInventory = async () => {
+      try {
+        const res = await getInventorySummary();
+        if (!cancelled && res?.data) {
+          setInventorySummary(res.data);
+        }
+      } catch {
+        // Non-blocking
+      }
+    };
+    fetchInventory();
+
     return () => {
       cancelled = true;
     };
@@ -203,6 +222,21 @@ function DashboardPage() {
           Farm Sections & Management
         </h3>
         <div className="quick-nav-grid">
+          {/* Flocks & Batches */}
+          <div className="quick-nav-card">
+            <div className="quick-nav-card-header">
+              <span className="quick-nav-icon"><FlockIcon size={20} /></span>
+              <span className="badge badge-upcoming">
+                {flocks.filter((f) => f.status === "ACTIVE").length} Active
+              </span>
+            </div>
+            <h4>Flocks & Batches</h4>
+            <p>Manage biological batches, track age, mortality rates, FCR, and laying percentages.</p>
+            <Link to="/flocks" className="quick-nav-link">
+              Manage Flocks <ArrowRightIcon size={14} />
+            </Link>
+          </div>
+
           {/* Daily Records */}
           <div className="quick-nav-card">
             <div className="quick-nav-card-header">
@@ -213,6 +247,27 @@ function DashboardPage() {
             <p>Log mortality, feed usage in kilograms, and daily egg collection counts.</p>
             <Link to="/daily-records" className="quick-nav-link">
               View Daily Records <ArrowRightIcon size={14} />
+            </Link>
+          </div>
+
+          {/* Vaccinations */}
+          <div className="quick-nav-card">
+            <div className="quick-nav-card-header">
+              <span className="quick-nav-icon"><VaccineIcon size={20} /></span>
+              <span
+                className={`badge ${
+                  vaccinations.filter((v) => v.status === "PENDING").length > 0
+                    ? "badge-due-soon"
+                    : "badge-healthy"
+                }`}
+              >
+                {vaccinations.filter((v) => v.status === "PENDING").length} Pending
+              </span>
+            </div>
+            <h4>Vaccinations & Health</h4>
+            <p>Administer preventive medications and schedule disease immunizations.</p>
+            <Link to="/vaccinations" className="quick-nav-link">
+              View Schedule <ArrowRightIcon size={14} />
             </Link>
           </div>
 
@@ -273,8 +328,53 @@ function DashboardPage() {
               View Financials <ArrowRightIcon size={14} />
             </Link>
           </div>
+
+          {/* Feed & Inventory */}
+          <div className="quick-nav-card">
+            <div className="quick-nav-card-header">
+              <span className="quick-nav-icon"><InventoryIcon size={20} /></span>
+              <span className={`badge ${inventorySummary?.lowStockCount > 0 ? "badge-due-soon" : "badge-upcoming"}`}>
+                {inventorySummary?.lowStockCount > 0
+                  ? `${inventorySummary.lowStockCount} Low Stock`
+                  : `${inventorySummary?.totalFeedTypes ?? 0} Varieties`}
+              </span>
+            </div>
+            <h4>Inventory & Feed</h4>
+            <p>Track feed varieties, stock balances, purchase deliveries, and consumption.</p>
+            <Link to="/inventory" className="quick-nav-link">
+              Manage Inventory <ArrowRightIcon size={14} />
+            </Link>
+          </div>
         </div>
       </section>
+
+      {/* Low Stock Alert on Dashboard */}
+      {inventorySummary?.lowStockCount > 0 && (
+        <div
+          className="alert-banner alert-warning"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "#fffbeb",
+            border: "1px solid #fde68a",
+            color: "#92400e",
+            padding: "12px 16px",
+            borderRadius: "8px",
+            marginBottom: "24px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <AlertTriangleIcon size={20} />
+            <div>
+              <strong>Feed Stock Alert:</strong> {inventorySummary.lowStockCount} feed {inventorySummary.lowStockCount === 1 ? "variety is" : "varieties are"} running low and require replenishment.
+            </div>
+          </div>
+          <Link to="/inventory" className="primary-button" style={{ padding: "6px 14px", fontSize: "13px", textDecoration: "none" }}>
+            View Feed Stock
+          </Link>
+        </div>
+      )}
 
       {/* Operational Summary Cards */}
       <div className="dashboard-summary-columns">

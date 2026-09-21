@@ -224,6 +224,38 @@ const deleteSupplier = async (req, res, next) => {
       });
     }
 
+    // Safeguard: Check whether the supplier has any outstanding unpaid debt
+    const unsettledExpenses = await prisma.expense.findMany({
+      where: {
+        supplierId: Number(id),
+        userId,
+        OR: [
+          { amountDue: { gt: 0 } },
+          { paymentStatus: { in: ["PARTIALLY_PAID", "UNPAID"] } },
+        ],
+      },
+      select: {
+        amount: true,
+        amountPaid: true,
+        amountDue: true,
+      },
+    });
+
+    const totalOutstanding = unsettledExpenses.reduce((sum, exp) => {
+      const due =
+        exp.amountDue !== null && exp.amountDue !== undefined
+          ? Number(exp.amountDue)
+          : Math.max(0, Number(exp.amount) - Number(exp.amountPaid || 0));
+      return sum + due;
+    }, 0);
+
+    if (totalOutstanding > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete supplier while an outstanding balance exists. GMD ${totalOutstanding.toLocaleString()} is still outstanding. Outstanding balances must be settled before deletion.`,
+      });
+    }
+
     await prisma.supplier.delete({
       where: { id: Number(id) },
     });

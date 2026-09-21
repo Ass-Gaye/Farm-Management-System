@@ -2,7 +2,30 @@
 
 Base URL for local development: `http://localhost:5000/api`
 
-There is no authentication or authorization in the current API. Requests use JSON bodies where a body is required. Successful responses use `{ "success": true, ... }`; resource responses place the resource or list in `data`.
+Requests use JSON bodies where a body is required. Successful responses return `{ "success": true, ... }`; resource responses place the payload in `data`.
+
+## Authentication & Security
+
+- **Authentication:** All routes (except `/api/health`, `/api/auth/register`, and `/api/auth/login`) require a JSON Web Token provided in the `Authorization: Bearer <token>` header.
+- **Tenant Isolation:** All records (houses, daily records, breeds, health conditions, slaughter plans, finances, customers, suppliers, inventory) are strictly isolated by `userId`. Users cannot access or mutate resources belonging to other accounts.
+- **Security Headers & Rate Limiting:** Express is secured with `helmet()` security headers and `express-rate-limit` on authentication endpoints.
+
+## Authentication Endpoints
+
+### `POST /api/auth/register`
+Creates a new user account.
+- Body: `{ "name": "Farmer John", "email": "john@example.com", "password": "securepassword" }`
+- Response `201`: `{ "success": true, "data": { "user": { "id": 1, "name": "Farmer John", "email": "john@example.com" }, "token": "jwt..." } }`
+
+### `POST /api/auth/login`
+Authenticates user credentials.
+- Body: `{ "email": "john@example.com", "password": "securepassword" }`
+- Response `200`: `{ "success": true, "data": { "user": { "id": 1, "name": "Farmer John", "email": "john@example.com" }, "token": "jwt..." } }`
+
+### `GET /api/auth/me`
+Returns the authenticated user profile.
+- Header: `Authorization: Bearer <token>`
+- Response `200`: `{ "success": true, "data": { "id": 1, "name": "Farmer John", "email": "john@example.com" } }`
 
 ## Common Validation Rules
 

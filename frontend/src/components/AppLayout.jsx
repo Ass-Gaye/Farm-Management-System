@@ -1,21 +1,26 @@
+import { useState } from "react";
 import { Outlet, useNavigate, Link, useLocation } from "react-router-dom";
 import { useFarm } from "../context/useFarm";
 import PageNavigation from "./common/PageNavigation";
 import ConfirmDialog from "./ConfirmDialog";
 import EmptyState from "./common/EmptyState";
+import ProfileModal from "./ProfileModal";
 import { PlusIcon } from "./Icons";
 
 function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const {
     currentUser,
+    setCurrentUser,
     handleLogout,
     houses,
     selectedHouse,
     selectHouse,
     error,
     toast,
+    showToast,
     closeToast,
     confirmDialog,
     setConfirmDialog,
@@ -25,6 +30,8 @@ function AppLayout() {
     deleteBreedHandler,
     deleteConditionHandler,
     deleteSlaughterHandler,
+    deleteFlockHandler,
+    deleteVaccinationHandler,
   } = useFarm();
 
   // Check if current route is a dedicated full-screen form page
@@ -46,10 +53,24 @@ function AppLayout() {
           {currentUser && (
             <div className="user-profile">
               <span className="user-avatar" aria-hidden="true">👤</span>
-              <div className="user-info">
+              <div
+                className="user-info"
+                style={{ cursor: "pointer" }}
+                onClick={() => setShowProfileModal(true)}
+                title="Account settings & change password"
+              >
                 <strong>{currentUser.name}</strong>
                 <span>{currentUser.email}</span>
               </div>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ padding: "4px 8px", fontSize: 11 }}
+                onClick={() => setShowProfileModal(true)}
+                title="Account settings & change password"
+              >
+                ⚙️ Settings
+              </button>
               <button
                 type="button"
                 className="logout-button"
@@ -144,6 +165,26 @@ function AppLayout() {
           />
         )}
 
+        {confirmDialog?.type === "flock" && (
+          <ConfirmDialog
+            title="Delete flock batch?"
+            message={`This will permanently delete flock batch "${confirmDialog.name}". Any related daily production or vaccination entries will be updated.`}
+            onCancel={() => setConfirmDialog(null)}
+            onConfirm={() => deleteFlockHandler(confirmDialog.id)}
+            loading={actionLoading}
+          />
+        )}
+
+        {confirmDialog?.type === "vaccination" && (
+          <ConfirmDialog
+            title="Delete vaccination record?"
+            message="This will remove this vaccination schedule entry."
+            onCancel={() => setConfirmDialog(null)}
+            onConfirm={() => deleteVaccinationHandler(confirmDialog.id)}
+            loading={actionLoading}
+          />
+        )}
+
         {/* Global Error Banner */}
         {error && <div className="error-message">{error}</div>}
 
@@ -166,6 +207,15 @@ function AppLayout() {
           </>
         )}
       </main>
+
+      {/* User Account & Password Modal */}
+      <ProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        user={currentUser}
+        onProfileUpdated={(updated) => setCurrentUser(updated)}
+        showToast={showToast}
+      />
 
       {/* Global Toast Notification */}
       {toast && (

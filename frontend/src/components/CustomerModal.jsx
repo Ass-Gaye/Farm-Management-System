@@ -1,5 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { createCustomer, updateCustomer } from "../services/api";
+
+const getInitialFormData = (initialData) => ({
+  name: initialData?.name || "",
+  phone: initialData?.phone || "",
+  email: initialData?.email || "",
+  address: initialData?.address || "",
+  notes: initialData?.notes || "",
+  active: initialData?.active !== undefined ? Boolean(initialData.active) : true,
+});
 
 function CustomerModal({
   isOpen,
@@ -8,40 +17,10 @@ function CustomerModal({
   onCancel,
 }) {
   const isEditing = Boolean(initialData?.id);
-  const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    email: "",
-    address: "",
-    notes: "",
-    active: true,
-  });
+  const [formData, setFormData] = useState(() => getInitialFormData(initialData));
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (initialData) {
-      setFormData({
-        name: initialData.name || "",
-        phone: initialData.phone || "",
-        email: initialData.email || "",
-        address: initialData.address || "",
-        notes: initialData.notes || "",
-        active: initialData.active !== undefined ? Boolean(initialData.active) : true,
-      });
-    } else {
-      setFormData({
-        name: "",
-        phone: "",
-        email: "",
-        address: "",
-        notes: "",
-        active: true,
-      });
-    }
-    setError("");
-  }, [initialData, isOpen]);
 
   if (!isOpen) return null;
 

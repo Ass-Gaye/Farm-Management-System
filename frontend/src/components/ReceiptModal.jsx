@@ -17,7 +17,6 @@ function ReceiptModal({
   };
 
   const isPartiallyPaid = sale.paymentStatus === "PARTIALLY_PAID";
-  const isUnpaid = sale.paymentStatus === "UNPAID";
   const isPaid = sale.paymentStatus === "PAID";
 
   return (

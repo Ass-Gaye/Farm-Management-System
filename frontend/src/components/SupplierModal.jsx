@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { createSupplier, updateSupplier } from "../services/api";
 
 const SUPPLIER_CATEGORIES = [
@@ -12,6 +12,16 @@ const SUPPLIER_CATEGORIES = [
   "Other",
 ];
 
+const getInitialFormData = (initialData) => ({
+  name: initialData?.name || "",
+  phone: initialData?.phone || "",
+  email: initialData?.email || "",
+  address: initialData?.address || "",
+  category: initialData?.category || SUPPLIER_CATEGORIES[0],
+  notes: initialData?.notes || "",
+  active: initialData?.active !== undefined ? Boolean(initialData.active) : true,
+});
+
 function SupplierModal({
   isOpen,
   initialData = null,
@@ -19,43 +29,10 @@ function SupplierModal({
   onCancel,
 }) {
   const isEditing = Boolean(initialData?.id);
-  const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    email: "",
-    address: "",
-    category: SUPPLIER_CATEGORIES[0],
-    notes: "",
-    active: true,
-  });
+  const [formData, setFormData] = useState(() => getInitialFormData(initialData));
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (initialData) {
-      setFormData({
-        name: initialData.name || "",
-        phone: initialData.phone || "",
-        email: initialData.email || "",
-        address: initialData.address || "",
-        category: initialData.category || SUPPLIER_CATEGORIES[0],
-        notes: initialData.notes || "",
-        active: initialData.active !== undefined ? Boolean(initialData.active) : true,
-      });
-    } else {
-      setFormData({
-        name: "",
-        phone: "",
-        email: "",
-        address: "",
-        category: SUPPLIER_CATEGORIES[0],
-        notes: "",
-        active: true,
-      });
-    }
-    setError("");
-  }, [initialData, isOpen]);
 
   if (!isOpen) return null;
 

@@ -1,7 +1,15 @@
 const jwt = require("jsonwebtoken");
 const prisma = require("../lib/prisma");
 
-const JWT_SECRET = process.env.JWT_SECRET || "poultry-mgmt-jwt-secret-key-2026-super-secure";
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  (process.env.NODE_ENV === "test" ? "test-jwt-secret-key" : undefined);
+
+if (!JWT_SECRET) {
+  throw new Error(
+    "FATAL: JWT_SECRET environment variable is not defined. Please set it in your environment."
+  );
+}
 
 /**
  * Authentication middleware verifying JSON Web Token in the Authorization header.

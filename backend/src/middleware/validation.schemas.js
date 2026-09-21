@@ -31,6 +31,16 @@ const loginSchema = z.object({
     .min(1, "Password is required"),
 });
 
+const updateProfileSchema = z.object({
+  name: z.string().trim().min(2, "Name must be at least 2 characters").optional(),
+  email: z.string().trim().email("Please provide a valid email address").optional(),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newPassword: z.string().min(6, "New password must be at least 6 characters"),
+});
+
 // House Schemas
 const createHouseSchema = z.object({
   name: z
@@ -52,6 +62,12 @@ const createDailyRecordSchema = z.object({
     .number()
     .int("House ID must be a whole number")
     .positive("House ID must be greater than 0"),
+  flockId: z
+    .number()
+    .int("Flock ID must be a whole number")
+    .positive("Flock ID must be greater than 0")
+    .optional()
+    .nullable(),
   date: z.coerce.date({
     error: "Date must be a valid date",
   }),
@@ -66,12 +82,32 @@ const createDailyRecordSchema = z.object({
     .number()
     .int("Eggs collected must be a whole number")
     .nonnegative("Eggs collected cannot be negative"),
+  avgWeightGrams: z
+    .number()
+    .nonnegative("Average weight cannot be negative")
+    .optional()
+    .nullable(),
+  feedTypeId: z
+    .number()
+    .int("Feed type ID must be a whole number")
+    .positive("Feed type ID must be greater than 0")
+    .optional()
+    .nullable(),
 });
 
 const updateDailyRecordSchema = z.object({
-  date: z.coerce.date({
-    error: "Date must be a valid date",
-  }),
+  flockId: z
+    .number()
+    .int("Flock ID must be a whole number")
+    .positive("Flock ID must be greater than 0")
+    .optional()
+    .nullable(),
+  date: z.coerce
+    .date({
+      error: "Date must be a valid date",
+    })
+    .optional()
+    .nullable(),
   mortality: z
     .number()
     .int("Mortality must be a whole number")
@@ -83,6 +119,17 @@ const updateDailyRecordSchema = z.object({
     .number()
     .int("Eggs collected must be a whole number")
     .nonnegative("Eggs collected cannot be negative"),
+  avgWeightGrams: z
+    .number()
+    .nonnegative("Average weight cannot be negative")
+    .optional()
+    .nullable(),
+  feedTypeId: z
+    .number()
+    .int("Feed type ID must be a whole number")
+    .positive("Feed type ID must be greater than 0")
+    .optional()
+    .nullable(),
 });
 
 // Breed Schemas
@@ -278,6 +325,222 @@ const updateSlaughterPlanSchema = z.object({
     .nullable(),
 });
 
+// Flock Schemas
+const createFlockSchema = z.object({
+  houseId: z
+    .number()
+    .int("House ID must be a whole number")
+    .positive("House ID must be greater than 0"),
+  breedId: z
+    .number()
+    .int("Breed ID must be a whole number")
+    .positive("Breed ID must be greater than 0")
+    .optional()
+    .nullable(),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Flock name is required"),
+  batchNumber: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  purpose: z
+    .enum(["BROILER", "LAYER", "BREEDER", "DUAL_PURPOSE", "OTHER"])
+    .default("BROILER"),
+  birdsPlaced: z
+    .number()
+    .int("Birds placed must be a whole number")
+    .positive("Birds placed must be greater than 0"),
+  placementDate: z.coerce.date({
+    error: "Placement date must be a valid date",
+  }),
+  expectedMarketDate: z.coerce
+    .date({
+      error: "Expected market date must be a valid date",
+    })
+    .optional()
+    .nullable(),
+  targetWeightKg: z.coerce
+    .number()
+    .positive("Target weight must be greater than 0")
+    .optional()
+    .nullable(),
+  status: z
+    .enum(["ACTIVE", "COMPLETED", "SOLD", "SLAUGHTERED", "ARCHIVED"])
+    .default("ACTIVE"),
+  notes: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+});
+
+const updateFlockSchema = z.object({
+  houseId: z
+    .number()
+    .int("House ID must be a whole number")
+    .positive("House ID must be greater than 0")
+    .optional(),
+  breedId: z
+    .number()
+    .int("Breed ID must be a whole number")
+    .positive("Breed ID must be greater than 0")
+    .optional()
+    .nullable(),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Flock name is required")
+    .optional(),
+  batchNumber: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  purpose: z
+    .enum(["BROILER", "LAYER", "BREEDER", "DUAL_PURPOSE", "OTHER"])
+    .optional(),
+  birdsPlaced: z
+    .number()
+    .int("Birds placed must be a whole number")
+    .positive("Birds placed must be greater than 0")
+    .optional(),
+  placementDate: z.coerce
+    .date({
+      error: "Placement date must be a valid date",
+    })
+    .optional(),
+  expectedMarketDate: z.coerce
+    .date({
+      error: "Expected market date must be a valid date",
+    })
+    .optional()
+    .nullable(),
+  targetWeightKg: z.coerce
+    .number()
+    .positive("Target weight must be greater than 0")
+    .optional()
+    .nullable(),
+  status: z
+    .enum(["ACTIVE", "COMPLETED", "SOLD", "SLAUGHTERED", "ARCHIVED"])
+    .optional(),
+  notes: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+});
+
+// Vaccination Schemas
+const createVaccinationSchema = z.object({
+  flockId: z
+    .number()
+    .int("Flock ID must be a whole number")
+    .positive("Flock ID must be greater than 0"),
+  vaccineName: z
+    .string()
+    .trim()
+    .min(1, "Vaccine name is required"),
+  disease: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  targetAgeDays: z
+    .number()
+    .int("Target age days must be a whole number")
+    .nonnegative("Target age days cannot be negative")
+    .optional()
+    .nullable(),
+  scheduledDate: z.coerce.date({
+    error: "Scheduled date must be a valid date",
+  }),
+  administeredDate: z.coerce
+    .date({
+      error: "Administered date must be a valid date",
+    })
+    .optional()
+    .nullable(),
+  status: z
+    .enum(["PENDING", "COMPLETED", "MISSED"])
+    .default("PENDING"),
+  dosage: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  administeredBy: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  cost: z.coerce
+    .number()
+    .nonnegative("Cost cannot be negative")
+    .optional()
+    .nullable(),
+  notes: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+});
+
+const updateVaccinationSchema = z.object({
+  vaccineName: z
+    .string()
+    .trim()
+    .min(1, "Vaccine name is required")
+    .optional(),
+  disease: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  targetAgeDays: z
+    .number()
+    .int("Target age days must be a whole number")
+    .nonnegative("Target age days cannot be negative")
+    .optional()
+    .nullable(),
+  scheduledDate: z.coerce
+    .date({
+      error: "Scheduled date must be a valid date",
+    })
+    .optional(),
+  administeredDate: z.coerce
+    .date({
+      error: "Administered date must be a valid date",
+    })
+    .optional()
+    .nullable(),
+  status: z
+    .enum(["PENDING", "COMPLETED", "MISSED"])
+    .optional(),
+  dosage: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  administeredBy: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  cost: z.coerce
+    .number()
+    .nonnegative("Cost cannot be negative")
+    .optional()
+    .nullable(),
+  notes: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+});
+
 // Finance Categories
 const EXPENSE_CATEGORIES = [
   "Feed",
@@ -444,6 +707,12 @@ const createExpenseSchema = z.object({
     .positive("House ID must be greater than 0")
     .optional()
     .nullable(),
+  flockId: z
+    .number()
+    .int("Flock ID must be a whole number")
+    .positive("Flock ID must be greater than 0")
+    .optional()
+    .nullable(),
   breedId: z
     .number()
     .int("Breed ID must be a whole number")
@@ -454,6 +723,12 @@ const createExpenseSchema = z.object({
     .number()
     .int("Supplier ID must be a whole number")
     .positive("Supplier ID must be greater than 0")
+    .optional()
+    .nullable(),
+  feedTypeId: z
+    .number()
+    .int("Feed type ID must be a whole number")
+    .positive("Feed type ID must be greater than 0")
     .optional()
     .nullable(),
   category: z
@@ -516,6 +791,12 @@ const updateExpenseSchema = z.object({
     .positive("House ID must be greater than 0")
     .optional()
     .nullable(),
+  flockId: z
+    .number()
+    .int("Flock ID must be a whole number")
+    .positive("Flock ID must be greater than 0")
+    .optional()
+    .nullable(),
   breedId: z
     .number()
     .int("Breed ID must be a whole number")
@@ -526,6 +807,12 @@ const updateExpenseSchema = z.object({
     .number()
     .int("Supplier ID must be a whole number")
     .positive("Supplier ID must be greater than 0")
+    .optional()
+    .nullable(),
+  feedTypeId: z
+    .number()
+    .int("Feed type ID must be a whole number")
+    .positive("Feed type ID must be greater than 0")
     .optional()
     .nullable(),
   category: z
@@ -586,6 +873,12 @@ const createIncomeSchema = z.object({
     .number()
     .int("House ID must be a whole number")
     .positive("House ID must be greater than 0")
+    .optional()
+    .nullable(),
+  flockId: z
+    .number()
+    .int("Flock ID must be a whole number")
+    .positive("Flock ID must be greater than 0")
     .optional()
     .nullable(),
   breedId: z
@@ -660,6 +953,12 @@ const updateIncomeSchema = z.object({
     .positive("House ID must be greater than 0")
     .optional()
     .nullable(),
+  flockId: z
+    .number()
+    .int("Flock ID must be a whole number")
+    .positive("Flock ID must be greater than 0")
+    .optional()
+    .nullable(),
   breedId: z
     .number()
     .int("Breed ID must be a whole number")
@@ -724,6 +1023,143 @@ const updateIncomeSchema = z.object({
     .nullable(),
 });
 
+// Feed Type Schemas
+const createFeedTypeSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Feed type name is required"),
+  category: z
+    .string()
+    .trim()
+    .optional()
+    .default("FEED"),
+  description: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  unit: z
+    .enum(["kg", "bags"], {
+      error: "Feed unit must be either kg or bags",
+    })
+    .transform((value) => value.trim().toLowerCase())
+    .optional()
+    .default("kg"),
+  bagWeightKg: z.coerce
+    .number()
+    .positive("Bag weight must be greater than 0")
+    .optional()
+    .default(50),
+  minimumStock: z.coerce
+    .number()
+    .nonnegative("Minimum stock cannot be negative")
+    .optional()
+    .default(0),
+  currentStock: z.coerce
+    .number()
+    .nonnegative("Current stock cannot be negative")
+    .optional()
+    .default(0),
+  unitCost: z.coerce
+    .number()
+    .nonnegative("Unit cost cannot be negative")
+    .optional()
+    .default(0),
+  active: z.boolean().optional().default(true),
+}).refine(
+  (data) => {
+    if (data.unit === "bags") {
+      return data.bagWeightKg !== undefined && data.bagWeightKg !== null && Number(data.bagWeightKg) > 0;
+    }
+    return true;
+  },
+  {
+    message: "A valid bag weight (greater than 0 kg) is required when unit is bags",
+    path: ["bagWeightKg"],
+  }
+);
+
+const updateFeedTypeSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Feed type name is required")
+    .optional(),
+  category: z
+    .string()
+    .trim()
+    .optional(),
+  description: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  unit: z
+    .enum(["kg", "bags"], {
+      error: "Feed unit must be either kg or bags",
+    })
+    .transform((value) => value.trim().toLowerCase())
+    .optional(),
+  bagWeightKg: z.coerce
+    .number()
+    .positive("Bag weight must be greater than 0")
+    .optional()
+    .nullable(),
+  minimumStock: z.coerce
+    .number()
+    .nonnegative("Minimum stock cannot be negative")
+    .optional(),
+  unitCost: z.coerce
+    .number()
+    .nonnegative("Unit cost cannot be negative")
+    .optional(),
+  active: z.boolean().optional(),
+}).refine(
+  (data) => {
+    if (data.unit === "bags" && data.bagWeightKg !== undefined) {
+      return data.bagWeightKg !== null && Number(data.bagWeightKg) > 0;
+    }
+    return true;
+  },
+  {
+    message: "A valid bag weight (greater than 0 kg) is required when unit is bags",
+    path: ["bagWeightKg"],
+  }
+);
+
+// Stock Adjustment Schema
+const stockAdjustmentSchema = z.object({
+  feedTypeId: z
+    .number()
+    .int("Feed type ID must be a whole number")
+    .positive("Feed type ID must be greater than 0"),
+  type: z
+    .enum(["ADJUSTMENT", "WASTAGE", "RETURN", "PURCHASE", "CONSUMPTION"])
+    .default("ADJUSTMENT"),
+  quantity: z.coerce
+    .number({ error: "Quantity is required" })
+    .refine((val) => val !== 0, { message: "Adjustment quantity cannot be zero" }),
+  unit: z
+    .string()
+    .trim()
+    .optional(),
+  reason: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  date: z.coerce
+    .date({ error: "Date must be a valid date" })
+    .optional(),
+  houseId: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .nullable(),
+});
+
 // Param Schemas
 const idParamSchema = z.object({
   id: z.coerce.number().int().positive(),
@@ -736,6 +1172,8 @@ const houseIdParamSchema = z.object({
 module.exports = {
   registerSchema,
   loginSchema,
+  updateProfileSchema,
+  changePasswordSchema,
   createHouseSchema,
   createDailyRecordSchema,
   updateDailyRecordSchema,
@@ -745,6 +1183,10 @@ module.exports = {
   updateBirdConditionSchema,
   createSlaughterPlanSchema,
   updateSlaughterPlanSchema,
+  createFlockSchema,
+  updateFlockSchema,
+  createVaccinationSchema,
+  updateVaccinationSchema,
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
   createCustomerSchema,
@@ -755,6 +1197,9 @@ module.exports = {
   updateExpenseSchema,
   createIncomeSchema,
   updateIncomeSchema,
+  createFeedTypeSchema,
+  updateFeedTypeSchema,
+  stockAdjustmentSchema,
   idParamSchema,
   houseIdParamSchema,
 };

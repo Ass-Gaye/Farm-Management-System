@@ -70,9 +70,11 @@ before(async () => {
 
 after(async () => {
   await cleanupTestData();
-  await new Promise((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
+  if (server) {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
   await prisma.$disconnect();
 });
 
@@ -782,12 +784,604 @@ test("supports full authentication, user isolation, and features lifecycle", asy
   assert.ok(unsettledRes.body.data.some((t) => t.id === eggSaleId));
   assert.ok(unsettledRes.body.data.some((t) => t.id === feedPurchaseId));
 
+  // ==========================================
+  // PHASE 3: FEED & INVENTORY MANAGEMENT TESTS
+  // ==========================================
+
+  // TEST 1: Create Feed Type "Layer Feed", minimum stock: 100 kg
+  const createFeedRes = await request("/api/feed-types", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      name: "Layer Feed",
+      category: "FEED",
+      unit: "kg",
+      minimumStock: 100,
+      currentStock: 0,
+      unitCost: 0,
+    }),
+  });
+  assert.equal(createFeedRes.status, 201);
+  const feedTypeId = createFeedRes.body.data.id;
+  assert.equal(createFeedRes.body.data.name, "Layer Feed");
+  assert.equal(createFeedRes.body.data.currentStock, 0);
+  assert.equal(createFeedRes.body.data.minimumStock, 100);
+
+  // TEST 2 & 3: Feed Purchase from Supplier: 500 kg @ GMD 20/kg = GMD 10,000, Paid GMD 6,000, Due GMD 4,000
+  const phase3PurchaseRes = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      supplierId,
+      feedTypeId,
+      category: "Feed",
+      quantity: 500,
+      unit: "kg",
+      unitPrice: 20,
+      amount: 10000,
+      amountPaid: 6000,
+      date: new Date().toISOString(),
+      description: "Bulk Layer Feed delivery",
+    }),
+  });
+  assert.equal(phase3PurchaseRes.status, 201);
+  const phase3ExpenseId = phase3PurchaseRes.body.data.id;
+  assert.equal(phase3PurchaseRes.body.data.amount, 10000);
+  assert.equal(phase3PurchaseRes.body.data.amountPaid, 6000);
+  assert.equal(phase3PurchaseRes.body.data.amountDue, 4000);
+  assert.equal(phase3PurchaseRes.body.data.paymentStatus, "PARTIALLY_PAID");
+
+  // Verify Feed Stock increased to 500 kg
+  const feedAfterPurchase = await request(`/api/feed-types/${feedTypeId}`, { headers: authHeaders1 });
+  assert.equal(feedAfterPurchase.status, 200);
+  assert.equal(feedAfterPurchase.body.data.currentStock, 500);
+
+  // TEST 4: Daily production record consuming 25 kg feed
+  const feedDailyRecord = await request("/api/daily-records", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      houseId,
+      date: new Date("2026-06-25").toISOString(),
+      mortality: 0,
+      feedUsedKg: 25,
+      eggsCollected: 120,
+      feedTypeId,
+    }),
+  });
+  assert.equal(feedDailyRecord.status, 201);
+  const feedDailyRecordId = feedDailyRecord.body.data.id;
+
+  // Verify stock decreased by 25 kg to 475 kg
+  const feedAfterDaily = await request(`/api/feed-types/${feedTypeId}`, { headers: authHeaders1 });
+  assert.equal(feedAfterDaily.body.data.currentStock, 475);
+
+  // TEST 5: Stock adjustment -5 kg (reason: damaged feed)
+  const adjustRes = await request("/api/inventory/adjust", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      feedTypeId,
+      type: "ADJUSTMENT",
+      quantity: -5,
+      reason: "Damaged feed",
+    }),
+  });
+  assert.equal(adjustRes.status, 201);
+  assert.equal(adjustRes.body.data.feedType.currentStock, 470);
+  assert.equal(adjustRes.body.data.movement.balanceAfter, 470);
+  assert.equal(adjustRes.body.data.movement.reason, "Damaged feed");
+
+  // TEST 6: Low Stock indicator (Set minimum to 500 kg when stock is 470 kg)
+  const updateFeedMin = await request(`/api/feed-types/${feedTypeId}`, {
+    method: "PUT",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      minimumStock: 500,
+    }),
+  });
+  assert.equal(updateFeedMin.status, 200);
+  assert.equal(updateFeedMin.body.data.isLowStock, true);
+
+  // Verify Inventory Summary endpoint
+  const invSummary = await request("/api/inventory/summary", { headers: authHeaders1 });
+  assert.equal(invSummary.status, 200);
+  assert.ok(invSummary.body.data.totalFeedTypes >= 1);
+  assert.ok(invSummary.body.data.lowStockCount >= 1);
+  assert.ok(invSummary.body.data.recentMovements.length >= 3); // Purchase, consumption, adjustment
+
+  // TEST 7: Security & Data Isolation
+  // User 2 cannot access User 1's feed types or inventory
+  const user2FeedTypes = await request(`/api/feed-types/${feedTypeId}`, { headers: authHeaders2 });
+  assert.equal(user2FeedTypes.status, 404);
+
+  const user2Adjust = await request("/api/inventory/adjust", {
+    method: "POST",
+    headers: authHeaders2,
+    body: JSON.stringify({
+      feedTypeId,
+      type: "ADJUSTMENT",
+      quantity: -10,
+    }),
+  });
+  assert.equal(user2Adjust.status, 404);
+
+  const user2InvSummary = await request("/api/inventory/summary", { headers: authHeaders2 });
+  assert.equal(user2InvSummary.status, 200);
+  assert.equal(user2InvSummary.body.data.totalFeedTypes, 0);
+
+  // ==========================================
+  // HARDENING TESTS: B. NEGATIVE INVENTORY
+  // ==========================================
+
+  // Create dedicated test feed for negative inventory rules: stock 100 kg
+  const negFeedRes = await request("/api/feed-types", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      name: "Negative Test Feed",
+      category: "FEED",
+      unit: "kg",
+      bagWeightKg: 50,
+      minimumStock: 10,
+      currentStock: 100,
+      unitCost: 15,
+    }),
+  });
+  assert.equal(negFeedRes.status, 201);
+  const negFeedId = negFeedRes.body.data.id;
+  assert.equal(negFeedRes.body.data.currentStock, 100);
+
+  // B1: stock 100 kg, consume 25 kg -> 75 kg
+  const consume25Res = await request("/api/daily-records", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      houseId,
+      date: new Date("2026-06-28").toISOString(),
+      mortality: 0,
+      feedUsedKg: 25,
+      eggsCollected: 100,
+      feedTypeId: negFeedId,
+    }),
+  });
+  assert.equal(consume25Res.status, 201);
+  const consume25Id = consume25Res.body.data.id;
+
+  const negFeedAfter25 = await request(`/api/feed-types/${negFeedId}`, { headers: authHeaders1 });
+  assert.equal(negFeedAfter25.body.data.currentStock, 75);
+
+  // Adjust stock down to 20 kg (75 - 55 = 20 kg)
+  const adjustTo20Res = await request("/api/inventory/adjust", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      feedTypeId: negFeedId,
+      type: "ADJUSTMENT",
+      quantity: -55,
+      reason: "Reconciliation to 20kg",
+    }),
+  });
+  assert.equal(adjustTo20Res.status, 201);
+  assert.equal(adjustTo20Res.body.data.feedType.currentStock, 20);
+
+  // B2: stock 20 kg, consume 25 kg -> rejected
+  const overConsume20Res = await request("/api/daily-records", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      houseId,
+      date: new Date("2026-06-29").toISOString(),
+      mortality: 0,
+      feedUsedKg: 25,
+      eggsCollected: 100,
+      feedTypeId: negFeedId,
+    }),
+  });
+  assert.equal(overConsume20Res.status, 400);
+  assert.ok(overConsume20Res.body.message.includes("Insufficient feed stock"));
+
+  // Stock remains 20 kg
+  const negFeedAfterRejected = await request(`/api/feed-types/${negFeedId}`, { headers: authHeaders1 });
+  assert.equal(negFeedAfterRejected.body.data.currentStock, 20);
+
+  // Consume 10 kg -> stock becomes 10 kg
+  const consume10Res = await request("/api/daily-records", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      houseId,
+      date: new Date("2026-06-30").toISOString(),
+      mortality: 0,
+      feedUsedKg: 10,
+      eggsCollected: 100,
+      feedTypeId: negFeedId,
+    }),
+  });
+  assert.equal(consume10Res.status, 201);
+  const consume10Id = consume10Res.body.data.id;
+
+  const negFeedAfter10 = await request(`/api/feed-types/${negFeedId}`, { headers: authHeaders1 });
+  assert.equal(negFeedAfter10.body.data.currentStock, 10);
+
+  // B4: edit to an amount exceeding restored stock -> rejected (10 kg restored + 10 current = 20 kg < 25 kg)
+  const overEditRes = await request(`/api/daily-records/${consume10Id}`, {
+    method: "PUT",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      mortality: 0,
+      feedUsedKg: 25,
+      eggsCollected: 100,
+      feedTypeId: negFeedId,
+    }),
+  });
+  assert.equal(overEditRes.status, 400);
+  assert.ok(overEditRes.body.message.includes("Insufficient feed stock"));
+
+  // Add 10 kg stock via adjustment so stock is 20 kg (restored stock for consume10Id becomes 20 + 10 = 30 kg)
+  await request("/api/inventory/adjust", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      feedTypeId: negFeedId,
+      type: "ADJUSTMENT",
+      quantity: 10,
+      reason: "Add 10kg for edit test",
+    }),
+  });
+
+  // B3: edit old 10 kg consumption to 25 kg with sufficient restored stock -> correct (30 - 25 = 5 kg)
+  const validEditRes = await request(`/api/daily-records/${consume10Id}`, {
+    method: "PUT",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      mortality: 0,
+      feedUsedKg: 25,
+      eggsCollected: 100,
+      feedTypeId: negFeedId,
+    }),
+  });
+  assert.equal(validEditRes.status, 200);
+
+  const negFeedAfterValidEdit = await request(`/api/feed-types/${negFeedId}`, { headers: authHeaders1 });
+  assert.equal(negFeedAfterValidEdit.body.data.currentStock, 5);
+
+  // B5: delete consumption -> stock restored (5 + 25 = 30 kg)
+  const delConsumeRes = await request(`/api/daily-records/${consume10Id}`, {
+    method: "DELETE",
+    headers: authHeaders1,
+  });
+  assert.equal(delConsumeRes.status, 200);
+
+  const negFeedAfterDel = await request(`/api/feed-types/${negFeedId}`, { headers: authHeaders1 });
+  assert.equal(negFeedAfterDel.body.data.currentStock, 30);
+
+  // Clean up B test records
+  await request(`/api/daily-records/${consume25Id}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/feed-types/${negFeedId}`, { method: "DELETE", headers: authHeaders1 });
+
+  // ==========================================
+  // HARDENING TESTS: A. UNIT CONVERSIONS & BAG WEIGHT
+  // ==========================================
+
+  // A5: invalid bagWeightKg -> rejected
+  const invalidBagWeightRes1 = await request("/api/feed-types", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      name: "Zero Bag Weight Feed",
+      category: "FEED",
+      unit: "bags",
+      bagWeightKg: 0,
+      minimumStock: 5,
+      currentStock: 0,
+      unitCost: 1000,
+    }),
+  });
+  assert.equal(invalidBagWeightRes1.status, 400);
+
+  const invalidBagWeightRes2 = await request("/api/feed-types", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      name: "Negative Bag Weight Feed",
+      category: "FEED",
+      unit: "bags",
+      bagWeightKg: -10,
+      minimumStock: 5,
+      currentStock: 0,
+      unitCost: 1000,
+    }),
+  });
+  assert.equal(invalidBagWeightRes2.status, 400);
+
+  // A1: 50 kg -> correct (feed stored in kg)
+  const kgFeedRes = await request("/api/feed-types", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      name: "Kg Feed Type",
+      category: "FEED",
+      unit: "kg",
+      bagWeightKg: 50,
+      minimumStock: 10,
+      currentStock: 0,
+      unitCost: 20,
+    }),
+  });
+  assert.equal(kgFeedRes.status, 201);
+  const kgFeedId = kgFeedRes.body.data.id;
+
+  const buy50KgRes = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      supplierId,
+      feedTypeId: kgFeedId,
+      category: "Feed",
+      quantity: 50,
+      unit: "kg",
+      unitPrice: 20,
+      amount: 1000,
+      amountPaid: 1000,
+      date: new Date().toISOString(),
+    }),
+  });
+  assert.equal(buy50KgRes.status, 201);
+  const buy50KgExpenseId = buy50KgRes.body.data.id;
+
+  const kgFeedAfter50Kg = await request(`/api/feed-types/${kgFeedId}`, { headers: authHeaders1 });
+  assert.equal(kgFeedAfter50Kg.body.data.currentStock, 50);
+
+  // A2: 1 bag with bagWeightKg = 50 -> 50 kg (buy 1 bag for feed stored in kg -> converts to +50 kg)
+  const buy1BagForKgFeedRes = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      supplierId,
+      feedTypeId: kgFeedId,
+      category: "Feed",
+      quantity: 1,
+      unit: "bags",
+      unitPrice: 1000,
+      amount: 1000,
+      amountPaid: 1000,
+      date: new Date().toISOString(),
+    }),
+  });
+  assert.equal(buy1BagForKgFeedRes.status, 201);
+  const buy1BagExpenseId = buy1BagForKgFeedRes.body.data.id;
+
+  const kgFeedAfter1Bag = await request(`/api/feed-types/${kgFeedId}`, { headers: authHeaders1 });
+  assert.equal(kgFeedAfter1Bag.body.data.currentStock, 100);
+
+  // A3: 25 kg -> 0.5 bag when stored in bags
+  const bagFeedRes = await request("/api/feed-types", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      name: "Broiler Starter Bags",
+      category: "FEED",
+      unit: "bags",
+      bagWeightKg: 50,
+      minimumStock: 1,
+      currentStock: 2,
+      unitCost: 1200,
+    }),
+  });
+  assert.equal(bagFeedRes.status, 201);
+  const bagFeedId = bagFeedRes.body.data.id;
+  assert.equal(bagFeedRes.body.data.currentStock, 2);
+
+  // Daily consumption: 25 kg -> 25 / 50 = 0.5 bag deducted -> stock becomes 1.5 bags
+  const bagDailyRes = await request("/api/daily-records", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      houseId,
+      date: new Date("2026-07-01").toISOString(),
+      mortality: 0,
+      feedUsedKg: 25,
+      eggsCollected: 90,
+      feedTypeId: bagFeedId,
+    }),
+  });
+  assert.equal(bagDailyRes.status, 201);
+  const bagDailyId = bagDailyRes.body.data.id;
+
+  const bagFeedStockAfterDaily = await request(`/api/feed-types/${bagFeedId}`, { headers: authHeaders1 });
+  assert.equal(bagFeedStockAfterDaily.body.data.currentStock, 1.5);
+
+  // A4: unsupported tonnes/lbs conversion -> rejected
+  const buyTonnesRes = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      supplierId,
+      feedTypeId: bagFeedId,
+      category: "Feed",
+      quantity: 1,
+      unit: "tonnes",
+      unitPrice: 20000,
+      amount: 20000,
+      amountPaid: 20000,
+      date: new Date().toISOString(),
+    }),
+  });
+  assert.equal(buyTonnesRes.status, 400);
+  assert.ok(buyTonnesRes.body.message.includes("Unsupported feed unit conversion"));
+
+  const buyLbsRes = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      supplierId,
+      feedTypeId: bagFeedId,
+      category: "Feed",
+      quantity: 50,
+      unit: "lbs",
+      unitPrice: 500,
+      amount: 500,
+      amountPaid: 500,
+      date: new Date().toISOString(),
+    }),
+  });
+  assert.equal(buyLbsRes.status, 400);
+  assert.ok(buyLbsRes.body.message.includes("Unsupported feed unit conversion"));
+
+  // ==========================================
+  // HARDENING TESTS: C. SUPPLIER DELETION SAFEGUARD
+  // ==========================================
+
+  // Create test supplier for debt protection tests
+  const testSuppRes = await request("/api/suppliers", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      name: "Agri-Chem Supplies Ltd",
+      phone: "+220 7000123",
+      category: "Feed",
+    }),
+  });
+  assert.equal(testSuppRes.status, 201);
+  const testSuppId = testSuppRes.body.data.id;
+
+  // C3: supplier with amountDue > 0 -> deletion rejected
+  const unpaidExpenseRes = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      supplierId: testSuppId,
+      category: "Feed",
+      amount: 5000,
+      amountPaid: 0,
+      amountDue: 5000,
+      paymentStatus: "UNPAID",
+      date: new Date().toISOString(),
+      description: "Unpaid feed delivery",
+    }),
+  });
+  assert.equal(unpaidExpenseRes.status, 201);
+  const unpaidExpId = unpaidExpenseRes.body.data.id;
+
+  const delSupplierUnpaidRes = await request(`/api/suppliers/${testSuppId}`, {
+    method: "DELETE",
+    headers: authHeaders1,
+  });
+  assert.equal(delSupplierUnpaidRes.status, 400);
+  assert.ok(
+    delSupplierUnpaidRes.body.message.includes("is still outstanding") ||
+      delSupplierUnpaidRes.body.message.includes("outstanding balance")
+  );
+
+  // Clean up unpaid expense
+  await request(`/api/expenses/${unpaidExpId}`, { method: "DELETE", headers: authHeaders1 });
+
+  // C4: partial payment leaving amountDue > 0 -> deletion rejected
+  const partialExpenseRes = await request("/api/expenses", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      supplierId: testSuppId,
+      category: "Feed",
+      amount: 6000,
+      amountPaid: 4000,
+      amountDue: 2000,
+      paymentStatus: "PARTIALLY_PAID",
+      date: new Date().toISOString(),
+      description: "Partially paid feed delivery",
+    }),
+  });
+  assert.equal(partialExpenseRes.status, 201);
+  const partialExpId = partialExpenseRes.body.data.id;
+
+  const delSupplierPartialRes = await request(`/api/suppliers/${testSuppId}`, {
+    method: "DELETE",
+    headers: authHeaders1,
+  });
+  assert.equal(delSupplierPartialRes.status, 400);
+  assert.ok(
+    delSupplierPartialRes.body.message.includes("is still outstanding") ||
+      delSupplierPartialRes.body.message.includes("outstanding balance")
+  );
+
+  // C5: after debt is fully settled -> deletion behavior works according to existing rules
+  // Update partial expense to fully paid (amountPaid = 6000, amountDue = 0)
+  const settleExpenseRes = await request(`/api/expenses/${partialExpId}`, {
+    method: "PUT",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      category: "Feed",
+      amount: 6000,
+      amountPaid: 6000,
+      amountDue: 0,
+      paymentStatus: "PAID",
+      date: new Date().toISOString(),
+      description: "Fully settled feed delivery",
+    }),
+  });
+  assert.equal(settleExpenseRes.status, 200);
+
+  // C2: supplier with fully paid historical purchases -> historical data remains safe
+  const delSupplierSettledRes = await request(`/api/suppliers/${testSuppId}`, {
+    method: "DELETE",
+    headers: authHeaders1,
+  });
+  assert.equal(delSupplierSettledRes.status, 200);
+
+  // Verify historical expense still exists with supplierId set to null (SetNull ON DELETE)
+  const checkExpRes = await request(`/api/expenses/${partialExpId}`, { headers: authHeaders1 });
+  assert.equal(checkExpRes.status, 200);
+  assert.equal(checkExpRes.body.data.supplierId, null);
+
+  // C1: supplier with no outstanding debt -> existing deletion behavior works
+  const cleanSuppRes = await request("/api/suppliers", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      name: "Clean No-Debt Supplier",
+      phone: "+220 7111222",
+      category: "General",
+    }),
+  });
+  assert.equal(cleanSuppRes.status, 201);
+  const cleanSuppId = cleanSuppRes.body.data.id;
+
+  const delCleanSuppRes = await request(`/api/suppliers/${cleanSuppId}`, {
+    method: "DELETE",
+    headers: authHeaders1,
+  });
+  assert.equal(delCleanSuppRes.status, 200);
+
+  // Clean up Phase 3 unit & stock test entities
+  await request(`/api/daily-records/${bagDailyId}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/expenses/${buy50KgExpenseId}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/expenses/${buy1BagExpenseId}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/expenses/${partialExpId}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/feed-types/${kgFeedId}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/feed-types/${bagFeedId}`, { method: "DELETE", headers: authHeaders1 });
+
+  // Delete earlier test daily record and verify consumption restoration
+  await request(`/api/daily-records/${feedDailyRecordId}`, { method: "DELETE", headers: authHeaders1 });
+  const feedAfterRestore = await request(`/api/feed-types/${feedTypeId}`, { headers: authHeaders1 });
+  assert.equal(feedAfterRestore.body.data.currentStock, 495);
+
+  // Delete feed purchase expense and feed type
+  await request(`/api/expenses/${phase3ExpenseId}`, { method: "DELETE", headers: authHeaders1 });
+  await request(`/api/feed-types/${feedTypeId}`, { method: "DELETE", headers: authHeaders1 });
+
+  // Delete initial supplier
+  await request(`/api/expenses/${feedPurchaseId}`, { method: "DELETE", headers: authHeaders1 });
+  const deleteSupplierSuccessRes = await request(`/api/suppliers/${supplierId}`, {
+    method: "DELETE",
+    headers: authHeaders1,
+  });
+  assert.equal(deleteSupplierSuccessRes.status, 200);
+
   // 12k. Clean up Phase 2 test entities
   await request(`/api/income/${eggSaleId}`, { method: "DELETE", headers: authHeaders1 });
   await request(`/api/income/${birdSaleId}`, { method: "DELETE", headers: authHeaders1 });
-  await request(`/api/expenses/${feedPurchaseId}`, { method: "DELETE", headers: authHeaders1 });
   await request(`/api/customers/${customerId}`, { method: "DELETE", headers: authHeaders1 });
-  await request(`/api/suppliers/${supplierId}`, { method: "DELETE", headers: authHeaders1 });
 
   // 12. Cleanup and Deletion
   const deletePlan = await request(`/api/slaughter-plans/${planId}`, {

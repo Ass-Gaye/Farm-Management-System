@@ -126,8 +126,9 @@ function DailyRecordsPage() {
                 <thead>
                   <tr>
                     <th>Date</th>
+                    <th>Flock / Batch</th>
                     <th>Mortality</th>
-                    <th>Feed Used</th>
+                    <th>Feed & Weight</th>
                     <th>Eggs Collected</th>
                     <th style={{ textAlign: "right" }}>Actions</th>
                   </tr>
@@ -144,6 +145,15 @@ function DailyRecordsPage() {
                         })}
                       </td>
                       <td>
+                        {record.flock ? (
+                          <span className="breed-chip" style={{ fontSize: 12 }}>
+                            {record.flock.name} ({record.flock.purpose})
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)", fontSize: 12 }}>Whole House</span>
+                        )}
+                      </td>
+                      <td>
                         <span
                           style={{
                             fontWeight: 600,
@@ -156,7 +166,19 @@ function DailyRecordsPage() {
                           {record.mortality} birds
                         </span>
                       </td>
-                      <td>{Number(record.feedUsedKg).toFixed(1)} kg</td>
+                      <td>
+                        <div>{Number(record.feedUsedKg).toFixed(1)} kg</div>
+                        {record.feedType && (
+                          <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px" }}>
+                            🌾 {record.feedType.name}
+                          </div>
+                        )}
+                        {record.avgWeightGrams && (
+                          <div style={{ fontSize: "11px", color: "var(--color-primary)", marginTop: "2px" }}>
+                            ⚖️ {record.avgWeightGrams}g avg
+                          </div>
+                        )}
+                      </td>
                       <td>
                         <strong>{record.eggsCollected}</strong> eggs
                       </td>

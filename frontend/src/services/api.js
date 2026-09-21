@@ -74,6 +74,20 @@ export const getCurrentUser = async () => {
   return request("/auth/me");
 };
 
+export const updateProfile = async (profileData) => {
+  return request("/auth/profile", {
+    method: "PUT",
+    body: JSON.stringify(profileData),
+  });
+};
+
+export const changePassword = async ({ currentPassword, newPassword }) => {
+  return request("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+};
+
 export const logoutUser = () => {
   removeAuthToken();
 };
@@ -421,6 +435,147 @@ export const updateSupplier = async (id, supplierData) => {
 
 export const deleteSupplier = async (id) => {
   return request(`/suppliers/${id}`, {
+    method: "DELETE",
+  });
+};
+
+// ==================== Feed Types & Inventory ====================
+
+export const getFeedTypes = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/feed-types${queryString}`);
+};
+
+export const getFeedTypeById = async (id) => {
+  return request(`/feed-types/${id}`);
+};
+
+export const createFeedType = async (feedTypeData) => {
+  return request("/feed-types", {
+    method: "POST",
+    body: JSON.stringify(feedTypeData),
+  });
+};
+
+export const updateFeedType = async (id, feedTypeData) => {
+  return request(`/feed-types/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(feedTypeData),
+  });
+};
+
+export const deleteFeedType = async (id) => {
+  return request(`/feed-types/${id}`, {
+    method: "DELETE",
+  });
+};
+
+export const getInventorySummary = async () => {
+  return request("/inventory/summary");
+};
+
+export const getInventoryMovements = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/inventory/movements${queryString}`);
+};
+
+export const recordStockAdjustment = async (adjustmentData) => {
+  return request("/inventory/adjust", {
+    method: "POST",
+    body: JSON.stringify(adjustmentData),
+  });
+};
+
+// ==================== Flocks / Batches ====================
+
+export const getFlocks = async (params = {}) => {
+  let queryString = "";
+  if (typeof params === "number" || typeof params === "string") {
+    queryString = `?houseId=${params}`;
+  } else if (params && typeof params === "object") {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, val]) => {
+      if (val !== undefined && val !== null && val !== "") {
+        queryParams.append(key, val);
+      }
+    });
+    queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  }
+  return request(`/flocks${queryString}`);
+};
+
+export const getFlockById = async (id) => {
+  return request(`/flocks/${id}`);
+};
+
+export const createFlock = async (flockData) => {
+  return request("/flocks", {
+    method: "POST",
+    body: JSON.stringify(flockData),
+  });
+};
+
+export const updateFlock = async (id, flockData) => {
+  return request(`/flocks/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(flockData),
+  });
+};
+
+export const deleteFlock = async (id) => {
+  return request(`/flocks/${id}`, {
+    method: "DELETE",
+  });
+};
+
+// ==================== Vaccinations ====================
+
+export const getVaccinations = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/vaccinations${queryString}`);
+};
+
+export const createVaccination = async (vaccinationData) => {
+  return request("/vaccinations", {
+    method: "POST",
+    body: JSON.stringify(vaccinationData),
+  });
+};
+
+export const applyVaccinationTemplate = async (flockId) => {
+  return request("/vaccinations/auto-schedule", {
+    method: "POST",
+    body: JSON.stringify({ flockId }),
+  });
+};
+
+export const updateVaccination = async (id, vaccinationData) => {
+  return request(`/vaccinations/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(vaccinationData),
+  });
+};
+
+export const deleteVaccination = async (id) => {
+  return request(`/vaccinations/${id}`, {
     method: "DELETE",
   });
 };

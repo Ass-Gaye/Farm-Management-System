@@ -1,29 +1,19 @@
 import { useState, useEffect } from "react";
-import { createExpense, updateExpense, createIncome, updateIncome } from "../services/api";
+import {
+  createExpense,
+  updateExpense,
+  createIncome,
+  updateIncome,
+  getFeedTypes,
+  getSuppliers,
+} from "../services/api";
 import { DEFAULT_CURRENCY, formatCurrency } from "../services/currency";
+import {
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+} from "../constants/financeCategories";
 
-export const EXPENSE_CATEGORIES = [
-  "Feed",
-  "Medication",
-  "Vaccines",
-  "Labor/staff",
-  "Transportation",
-  "Electricity",
-  "Water",
-  "Equipment",
-  "Repairs",
-  "Poultry house maintenance",
-  "Packaging",
-  "Other",
-];
-
-export const INCOME_CATEGORIES = [
-  "Egg sales",
-  "Bird sales",
-  "Manure sales",
-  "Spent/layer bird sales",
-  "Other income",
-];
+export { EXPENSE_CATEGORIES, INCOME_CATEGORIES };
 
 function FinanceTransactionModal({
   isOpen,
@@ -31,17 +21,26 @@ function FinanceTransactionModal({
   initialData = null, // if editing
   houses = [],
   customers = [],
-  suppliers = [],
+  suppliers: propSuppliers = [],
   breeds = [],
   defaultHouseId = null,
+  defaultCategory = null,
   currency = DEFAULT_CURRENCY,
   onSuccess,
   onCancel,
+  onSaved,
+  onClose,
   onOpenCustomerModal,
   onOpenSupplierModal,
 }) {
   const isEditing = Boolean(initialData?.id);
   const [type, setType] = useState(initialData?.type || initialType);
+  const [feedTypes, setFeedTypes] = useState([]);
+  const [fetchedSuppliers, setFetchedSuppliers] = useState([]);
+
+  const suppliers = propSuppliers.length > 0 ? propSuppliers : fetchedSuppliers;
+  const handleClose = onCancel || onClose;
+  const handleSuccess = onSuccess || onSaved;
 
   const [formData, setFormData] = useState({
     category: "",
@@ -49,6 +48,7 @@ function FinanceTransactionModal({
     customerId: "",
     supplierId: "",
     breedId: "",
+    feedTypeId: "",
     quantity: "",
     unit: "",
     unitPrice: "",
@@ -61,6 +61,25 @@ function FinanceTransactionModal({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Load feed types & suppliers on open
+  useEffect(() => {
+    if (isOpen) {
+      getFeedTypes({ active: true })
+        .then((res) => {
+          if (res.data) setFeedTypes(res.data);
+        })
+        .catch(() => {});
+
+      if (propSuppliers.length === 0) {
+        getSuppliers({ active: true })
+          .then((res) => {
+            if (res.data) setFetchedSuppliers(res.data);
+          })
+          .catch(() => {});
+      }
+    }
+  }, [isOpen, propSuppliers.length]);
 
   // Populate or reset form
   useEffect(() => {
@@ -81,6 +100,7 @@ function FinanceTransactionModal({
         customerId: initialData.customerId ? String(initialData.customerId) : "",
         supplierId: initialData.supplierId ? String(initialData.supplierId) : "",
         breedId: initialData.breedId ? String(initialData.breedId) : "",
+        feedTypeId: initialData.feedTypeId ? String(initialData.feedTypeId) : "",
         quantity: initialData.quantity !== undefined && initialData.quantity !== null ? String(initialData.quantity) : "",
         unit: initialData.unit || (initialData.category === "Egg sales" ? "trays" : initialData.category?.includes("bird") ? "birds" : initialData.category === "Feed" ? "bags" : ""),
         unitPrice: initialData.unitPrice !== undefined && initialData.unitPrice !== null ? String(initialData.unitPrice) : "",
@@ -92,15 +112,16 @@ function FinanceTransactionModal({
       });
     } else {
       setType(initialType);
-      const defaultCategory = initialType === "Income" ? INCOME_CATEGORIES[0] : EXPENSE_CATEGORIES[0];
-      const defaultUnit = defaultCategory === "Egg sales" ? "trays" : defaultCategory.includes("bird") ? "birds" : defaultCategory === "Feed" ? "bags" : "";
+      const chosenCat = defaultCategory || (initialType === "Income" ? INCOME_CATEGORIES[0] : EXPENSE_CATEGORIES[0]);
+      const defaultUnit = chosenCat === "Egg sales" ? "trays" : chosenCat.includes("bird") ? "birds" : chosenCat === "Feed" ? "bags" : "";
 
       setFormData({
-        category: defaultCategory,
+        category: chosenCat,
         customCategory: "",
         customerId: "",
         supplierId: "",
         breedId: "",
+        feedTypeId: "",
         quantity: "",
         unit: defaultUnit,
         unitPrice: "",
@@ -112,7 +133,7 @@ function FinanceTransactionModal({
       });
     }
     setError("");
-  }, [initialData, initialType, defaultHouseId, isOpen]);
+  }, [initialData, initialType, defaultHouseId, defaultCategory, isOpen]);
 
   if (!isOpen) return null;
 
@@ -231,6 +252,27 @@ function FinanceTransactionModal({
       return;
     }
 
+    if (type === "Expense" && formData.feedTypeId && formData.quantity && parseFloat(formData.quantity) > 0) {
+      const selectedFeed = feedTypes.find((f) => String(f.id) === String(formData.feedTypeId));
+      const pUnit = (formData.unit || "").trim().toLowerCase();
+      const fUnit = (selectedFeed?.unit || "kg").trim().toLowerCase();
+      const isKg = (u) => ["kg", "kgs", "kilogram", "kilograms"].includes(u);
+      const isBag = (u) => ["bag", "bags"].includes(u);
+
+      if (!isKg(pUnit) && !isBag(pUnit)) {
+        setError(`Unsupported feed unit '${formData.unit}'. Supported units for automatic conversion are 'kg' and 'bags'.`);
+        return;
+      }
+
+      if ((isBag(pUnit) && isKg(fUnit)) || (isKg(pUnit) && isBag(fUnit)) || isBag(fUnit)) {
+        const bagWeight = Number(selectedFeed?.bagWeightKg);
+        if (!bagWeight || bagWeight <= 0) {
+          setError(`Feed type '${selectedFeed?.name || "Selected"}' does not have a valid bag weight configured for conversion.`);
+          return;
+        }
+      }
+    }
+
     const payload = {
       amount: totalAmount,
       category: finalCategory.trim(),
@@ -245,6 +287,7 @@ function FinanceTransactionModal({
       paymentStatus: derivedStatus,
       customerId: type === "Income" && formData.customerId ? Number(formData.customerId) : null,
       supplierId: type === "Expense" && formData.supplierId ? Number(formData.supplierId) : null,
+      feedTypeId: type === "Expense" && formData.feedTypeId ? Number(formData.feedTypeId) : null,
       breedId: formData.breedId ? Number(formData.breedId) : null,
     };
 
@@ -266,7 +309,12 @@ function FinanceTransactionModal({
         }
       }
 
-      onSuccess(result.data, type, isEditing);
+      if (handleSuccess) {
+        handleSuccess(result.data, type, isEditing);
+      }
+      if (handleClose) {
+        handleClose();
+      }
     } catch (err) {
       setError(err.message || "Failed to save financial record.");
     } finally {
@@ -291,7 +339,7 @@ function FinanceTransactionModal({
           <button
             type="button"
             className="modal-close"
-            onClick={onCancel}
+            onClick={handleClose}
             aria-label="Close"
           >
             ×
@@ -440,6 +488,51 @@ function FinanceTransactionModal({
             </div>
           )}
 
+          {/* Feed Variety Dropdown if category is Feed */}
+          {type === "Expense" && isFeedExpense && (
+            <div className="form-group">
+              <label htmlFor="tx-feedTypeId">
+                Feed Variety (Increases Inventory Stock)
+              </label>
+              <select
+                id="tx-feedTypeId"
+                name="feedTypeId"
+                value={formData.feedTypeId}
+                onChange={(e) => {
+                  const selId = e.target.value;
+                  const selectedFeed = feedTypes.find((ft) => String(ft.id) === String(selId));
+                  setFormData((prev) => {
+                    const next = { ...prev, feedTypeId: selId };
+                    if (selectedFeed) {
+                      next.unit = selectedFeed.unit || "bags";
+                      if (Number(selectedFeed.unitCost) > 0 && (!prev.unitPrice || prev.unitPrice === "0")) {
+                        next.unitPrice = String(selectedFeed.unitCost);
+                        if (prev.quantity && Number(prev.quantity) > 0) {
+                          const calcAmt = Number((Number(prev.quantity) * Number(selectedFeed.unitCost)).toFixed(2));
+                          next.amount = String(calcAmt);
+                          if (!prev.amountPaid || prev.amountPaid === prev.amount) {
+                            next.amountPaid = String(calcAmt);
+                          }
+                        }
+                      }
+                    }
+                    return next;
+                  });
+                }}
+              >
+                <option value="">-- General / Untracked Feed --</option>
+                {feedTypes.map((ft) => (
+                  <option key={ft.id} value={ft.id}>
+                    {ft.name} ({ft.currentStock} {ft.unit} in stock{ft.isLowStock ? " - LOW" : ""})
+                  </option>
+                ))}
+              </select>
+              <span style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4, display: "block" }}>
+                Purchased quantity will automatically increase physical stock and log an audit movement.
+              </span>
+            </div>
+          )}
+
           {/* Unit Pricing Section (Egg sales, Bird sales, Feed purchase, or general unit pricing) */}
           <div
             style={{
@@ -479,14 +572,26 @@ function FinanceTransactionModal({
 
               <div>
                 <label style={{ fontSize: 11, marginBottom: 4, display: "block" }}>Unit</label>
-                <input
-                  name="unit"
-                  type="text"
-                  placeholder={isEggSale ? "trays" : isBirdSale ? "birds" : isFeedExpense ? "bags" : "unit"}
-                  value={formData.unit}
-                  onChange={handleChange}
-                  style={{ width: "100%", padding: "6px 8px", fontSize: 13 }}
-                />
+                {isFeedExpense ? (
+                  <select
+                    name="unit"
+                    value={formData.unit || "bags"}
+                    onChange={handleChange}
+                    style={{ width: "100%", padding: "6px 8px", fontSize: 13 }}
+                  >
+                    <option value="bags">bags</option>
+                    <option value="kg">kg</option>
+                  </select>
+                ) : (
+                  <input
+                    name="unit"
+                    type="text"
+                    placeholder={isEggSale ? "trays" : isBirdSale ? "birds" : "unit"}
+                    value={formData.unit}
+                    onChange={handleChange}
+                    style={{ width: "100%", padding: "6px 8px", fontSize: 13 }}
+                  />
+                )}
               </div>
 
               <div>
@@ -677,7 +782,7 @@ function FinanceTransactionModal({
             <button
               type="button"
               className="secondary-button"
-              onClick={onCancel}
+              onClick={handleClose}
               disabled={saving}
             >
               Cancel

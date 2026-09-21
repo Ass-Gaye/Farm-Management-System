@@ -1,13 +1,38 @@
 const express = require("express");
-const { register, login, getMe } = require("../controllers/auth.controller");
+const rateLimit = require("express-rate-limit");
+const {
+  register,
+  login,
+  getMe,
+  updateProfile,
+  changePassword,
+} = require("../controllers/auth.controller");
 const { authenticate } = require("../middleware/auth.middleware");
 const { validate } = require("../middleware/validate");
-const { registerSchema, loginSchema } = require("../middleware/validation.schemas");
+const {
+  registerSchema,
+  loginSchema,
+  updateProfileSchema,
+  changePasswordSchema,
+} = require("../middleware/validation.schemas");
 
 const router = express.Router();
 
-router.post("/register", validate(registerSchema), register);
-router.post("/login", validate(loginSchema), login);
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: process.env.NODE_ENV === "test" ? 1000 : 20, // 20 attempts per 15 min window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many requests from this IP. Please try again after 15 minutes.",
+  },
+});
+
+router.post("/register", authLimiter, validate(registerSchema), register);
+router.post("/login", authLimiter, validate(loginSchema), login);
 router.get("/me", authenticate, getMe);
+router.put("/profile", authenticate, validate(updateProfileSchema), updateProfile);
+router.post("/change-password", authenticate, validate(changePasswordSchema), changePassword);
 
 module.exports = router;

@@ -1,0 +1,14 @@
+{
+  "name": "poultry-management-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Poultry Farm Management System",
+  "scripts": {
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "test:backend": "npm test --prefix backend",
+    "build:backend": "npm run build --prefix backend",
+    "build:frontend": "npm run build --prefix frontend",
+    "lint:frontend": "npm run lint --prefix frontend"
+  }
+}

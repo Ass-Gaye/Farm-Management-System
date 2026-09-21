@@ -3,7 +3,7 @@ const prisma = require("../lib/prisma");
 /**
  * Validates that optional houseId, breedId, customerId, or supplierId belong to the authenticated user.
  */
-const validateOwnership = async (userId, houseId, breedId, customerId, supplierId) => {
+const validateOwnership = async (userId, houseId, breedId, customerId, supplierId, feedTypeId, flockId) => {
   const uid = Number(userId);
 
   if (houseId) {
@@ -19,6 +19,24 @@ const validateOwnership = async (userId, houseId, breedId, customerId, supplierI
         valid: false,
         status: 404,
         error: "Poultry house not found or does not belong to your farm",
+      };
+    }
+  }
+
+  if (flockId) {
+    const flock = await prisma.flock.findFirst({
+      where: {
+        id: Number(flockId),
+        userId: uid,
+        ...(houseId ? { houseId: Number(houseId) } : {}),
+      },
+    });
+
+    if (!flock) {
+      return {
+        valid: false,
+        status: 404,
+        error: "Flock batch not found or does not belong to your poultry house",
       };
     }
   }
@@ -77,7 +95,90 @@ const validateOwnership = async (userId, houseId, breedId, customerId, supplierI
     }
   }
 
+  if (feedTypeId) {
+    const feedType = await prisma.feedType.findFirst({
+      where: {
+        id: Number(feedTypeId),
+        userId: uid,
+      },
+    });
+
+    if (!feedType) {
+      return {
+        valid: false,
+        status: 404,
+        error: "Feed type not found or does not belong to your farm",
+      };
+    }
+  }
+
   return { valid: true };
+};
+
+/**
+ * Computes quantity in the feedType's storage unit.
+ * Strictly validates supported unit conversions (kg <-> bags) and forbids 1:1 fallbacks.
+ */
+const convertToFeedUnit = (purchaseQty, purchaseUnit, feedType) => {
+  const pUnit = (purchaseUnit || "").trim().toLowerCase();
+  const fUnit = (feedType.unit || "").trim().toLowerCase();
+  const bagWeight = Number(feedType.bagWeightKg);
+
+  const isKg = (u) => ["kg", "kgs", "kilogram", "kilograms"].includes(u);
+  const isBag = (u) => ["bag", "bags"].includes(u);
+
+  // Both units must belong to supported units (kg or bags)
+  if (!isKg(pUnit) && !isBag(pUnit)) {
+    const error = new Error(
+      `Unsupported feed unit conversion from '${purchaseUnit || "unspecified"}'. Supported units for automatic conversion are 'kg' and 'bags'.`
+    );
+    error.code = "UNSUPPORTED_UNIT";
+    throw error;
+  }
+
+  if (!isKg(fUnit) && !isBag(fUnit)) {
+    const error = new Error(
+      `Unsupported feed storage unit '${feedType.unit}'. Supported storage units are 'kg' and 'bags'.`
+    );
+    error.code = "UNSUPPORTED_UNIT";
+    throw error;
+  }
+
+  // Same unit or identical unit family
+  if ((isKg(pUnit) && isKg(fUnit)) || (isBag(pUnit) && isBag(fUnit))) {
+    return purchaseQty;
+  }
+
+  // Bags to Kg conversion
+  if (isBag(pUnit) && isKg(fUnit)) {
+    if (!bagWeight || bagWeight <= 0) {
+      const error = new Error(
+        `Feed type '${feedType.name}' does not have a valid bag weight configured for conversion.`
+      );
+      error.code = "INVALID_BAG_WEIGHT";
+      throw error;
+    }
+    return purchaseQty * bagWeight;
+  }
+
+  // Kg to Bags conversion
+  if (isKg(pUnit) && isBag(fUnit)) {
+    if (!bagWeight || bagWeight <= 0) {
+      const error = new Error(
+        `Feed type '${feedType.name}' does not have a valid bag weight configured for conversion.`
+      );
+      error.code = "INVALID_BAG_WEIGHT";
+      throw error;
+    }
+    return purchaseQty / bagWeight;
+  }
+
+  // Any other unit pair is unsupported (no 1:1 fallback!)
+  const error = new Error(
+    `Unsupported feed unit conversion from '${purchaseUnit || "unspecified"}' to '${feedType.unit}'. Supported units for automatic conversion are 'kg' and 'bags'.`
+  );
+  error.code = "UNSUPPORTED_UNIT";
+  throw error;
 };
 
 /**
@@ -134,6 +235,7 @@ const createExpense = async (req, res, next) => {
       houseId,
       breedId,
       supplierId,
+      feedTypeId,
       category,
       amount,
       date,
@@ -143,9 +245,10 @@ const createExpense = async (req, res, next) => {
       unitPrice,
       amountPaid,
       paymentStatus,
+      flockId,
     } = req.body;
 
-    const check = await validateOwnership(req.user.id, houseId, breedId, null, supplierId);
+    const check = await validateOwnership(req.user.id, houseId, breedId, null, supplierId, feedTypeId, flockId);
     if (!check.valid) {
       return res.status(check.status).json({
         success: false,
@@ -161,35 +264,93 @@ const createExpense = async (req, res, next) => {
 
     const payState = computePaymentState(finalAmount, amountPaid, paymentStatus);
 
-    const expense = await prisma.expense.create({
-      data: {
-        userId: req.user.id,
-        houseId: houseId ? Number(houseId) : null,
-        breedId: breedId ? Number(breedId) : null,
-        supplierId: supplierId ? Number(supplierId) : null,
-        category: category.trim(),
-        amount: payState.amount,
-        date: new Date(date),
-        description: description ? description.trim() : null,
-        quantity: quantity !== undefined && quantity !== null && quantity !== "" ? Number(quantity) : null,
-        unit: unit ? unit.trim() : null,
-        unitPrice: unitPrice !== undefined && unitPrice !== null && unitPrice !== "" ? Number(unitPrice) : null,
-        amountPaid: payState.amountPaid,
-        amountDue: payState.amountDue,
-        paymentStatus: payState.paymentStatus,
+    const expense = await prisma.$transaction(
+      async (tx) => {
+        let feedType = null;
+        if (feedTypeId) {
+          feedType = await tx.feedType.findUnique({
+            where: { id: Number(feedTypeId) },
+          });
+        }
+
+        const exp = await tx.expense.create({
+          data: {
+            userId: req.user.id,
+            houseId: houseId ? Number(houseId) : null,
+            flockId: flockId ? Number(flockId) : null,
+            breedId: breedId ? Number(breedId) : null,
+            supplierId: supplierId ? Number(supplierId) : null,
+            feedTypeId: feedTypeId ? Number(feedTypeId) : null,
+            category: category.trim(),
+            amount: payState.amount,
+            date: new Date(date),
+            description: description ? description.trim() : null,
+            quantity: quantity !== undefined && quantity !== null && quantity !== "" ? Number(quantity) : null,
+            unit: unit ? unit.trim() : (feedType ? feedType.unit : null),
+            unitPrice: unitPrice !== undefined && unitPrice !== null && unitPrice !== "" ? Number(unitPrice) : null,
+            amountPaid: payState.amountPaid,
+            amountDue: payState.amountDue,
+            paymentStatus: payState.paymentStatus,
+          },
+          include: {
+            house: {
+              select: { id: true, name: true },
+            },
+            flock: {
+              select: { id: true, name: true, purpose: true },
+            },
+            breed: {
+              select: { id: true, name: true },
+            },
+            supplier: {
+              select: { id: true, name: true, phone: true, category: true },
+            },
+            feedType: {
+              select: { id: true, name: true, unit: true, bagWeightKg: true },
+            },
+          },
+        });
+
+        // If feed purchase: increase inventory and log movement
+        if (feedType && quantity && Number(quantity) > 0) {
+          const purchaseQty = convertToFeedUnit(Number(quantity), unit, feedType);
+          const currentStock = Number(feedType.currentStock);
+          const newStock = currentStock + purchaseQty;
+          const effectiveUnitCost = purchaseQty > 0 ? Number((payState.amount / purchaseQty).toFixed(2)) : Number(feedType.unitCost);
+
+          await tx.feedType.update({
+            where: { id: feedType.id },
+            data: {
+              currentStock: newStock,
+              unitCost: effectiveUnitCost > 0 ? effectiveUnitCost : feedType.unitCost,
+            },
+          });
+
+          await tx.inventoryMovement.create({
+            data: {
+              userId: req.user.id,
+              feedTypeId: feedType.id,
+              houseId: houseId ? Number(houseId) : null,
+              expenseId: exp.id,
+              type: "PURCHASE",
+              quantity: purchaseQty,
+              unit: feedType.unit,
+              unitCost: effectiveUnitCost,
+              totalCost: payState.amount,
+              balanceAfter: newStock,
+              date: new Date(date),
+              reason: exp.supplier ? `Feed purchase from ${exp.supplier.name}` : "Feed purchase",
+            },
+          });
+        }
+
+        return exp;
       },
-      include: {
-        house: {
-          select: { id: true, name: true },
-        },
-        breed: {
-          select: { id: true, name: true },
-        },
-        supplier: {
-          select: { id: true, name: true, phone: true, category: true },
-        },
-      },
-    });
+      {
+        maxWait: 15000,
+        timeout: 30000,
+      }
+    );
 
     res.status(201).json({
       success: true,
@@ -204,6 +365,12 @@ const createExpense = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (error.code === "UNSUPPORTED_UNIT" || error.code === "INVALID_BAG_WEIGHT") {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
     next(error);
   }
 };
@@ -213,7 +380,7 @@ const createExpense = async (req, res, next) => {
  */
 const getExpenses = async (req, res, next) => {
   try {
-    const { houseId, supplierId, category, paymentStatus, startDate, endDate } = req.query;
+    const { houseId, flockId, supplierId, feedTypeId, category, paymentStatus, startDate, endDate } = req.query;
 
     const where = {
       userId: req.user.id,
@@ -223,8 +390,16 @@ const getExpenses = async (req, res, next) => {
       where.houseId = Number(houseId);
     }
 
+    if (flockId) {
+      where.flockId = Number(flockId);
+    }
+
     if (supplierId) {
       where.supplierId = Number(supplierId);
+    }
+
+    if (feedTypeId) {
+      where.feedTypeId = Number(feedTypeId);
     }
 
     if (category) {
@@ -255,11 +430,17 @@ const getExpenses = async (req, res, next) => {
         house: {
           select: { id: true, name: true },
         },
+        flock: {
+          select: { id: true, name: true, purpose: true },
+        },
         breed: {
           select: { id: true, name: true },
         },
         supplier: {
           select: { id: true, name: true, phone: true, category: true },
+        },
+        feedType: {
+          select: { id: true, name: true, unit: true, bagWeightKg: true },
         },
       },
       orderBy: {
@@ -299,11 +480,17 @@ const getExpenseById = async (req, res, next) => {
         house: {
           select: { id: true, name: true },
         },
+        flock: {
+          select: { id: true, name: true, purpose: true },
+        },
         breed: {
           select: { id: true, name: true },
         },
         supplier: {
           select: { id: true, name: true, phone: true, category: true },
+        },
+        feedType: {
+          select: { id: true, name: true, unit: true, bagWeightKg: true },
         },
       },
     });
@@ -339,8 +526,10 @@ const updateExpense = async (req, res, next) => {
     const { id } = req.params;
     const {
       houseId,
+      flockId,
       breedId,
       supplierId,
+      feedTypeId,
       category,
       amount,
       date,
@@ -357,6 +546,9 @@ const updateExpense = async (req, res, next) => {
         id: Number(id),
         userId: req.user.id,
       },
+      include: {
+        inventoryMovements: true,
+      },
     });
 
     if (!existing) {
@@ -366,7 +558,17 @@ const updateExpense = async (req, res, next) => {
       });
     }
 
-    const check = await validateOwnership(req.user.id, houseId, breedId, null, supplierId);
+    const targetHouseId = houseId !== undefined ? (houseId ? Number(houseId) : null) : existing.houseId;
+    const targetFlockId = flockId !== undefined ? (flockId ? Number(flockId) : null) : existing.flockId;
+    const check = await validateOwnership(
+      req.user.id,
+      targetHouseId,
+      breedId !== undefined ? breedId : existing.breedId,
+      null,
+      supplierId !== undefined ? supplierId : existing.supplierId,
+      feedTypeId !== undefined ? feedTypeId : existing.feedTypeId,
+      targetFlockId
+    );
     if (!check.valid) {
       return res.status(check.status).json({
         success: false,
@@ -379,37 +581,117 @@ const updateExpense = async (req, res, next) => {
     const effectivePaid = amountPaid !== undefined ? Math.min(Number(amountPaid), effectiveAmount) : wasFullyPaid ? effectiveAmount : Math.min(Number(existing.amountPaid || 0), effectiveAmount);
     const payState = computePaymentState(effectiveAmount, effectivePaid, paymentStatus);
 
-    const updated = await prisma.expense.update({
-      where: {
-        id: Number(id),
-      },
-      data: {
-        houseId: houseId !== undefined ? (houseId ? Number(houseId) : null) : existing.houseId,
-        breedId: breedId !== undefined ? (breedId ? Number(breedId) : null) : existing.breedId,
-        supplierId: supplierId !== undefined ? (supplierId ? Number(supplierId) : null) : existing.supplierId,
-        category: category !== undefined ? category.trim() : existing.category,
-        amount: payState.amount,
-        date: date ? new Date(date) : existing.date,
-        description: description !== undefined ? (description ? description.trim() : null) : existing.description,
-        quantity: quantity !== undefined ? (quantity !== null && quantity !== "" ? Number(quantity) : null) : existing.quantity,
-        unit: unit !== undefined ? (unit ? unit.trim() : null) : existing.unit,
-        unitPrice: unitPrice !== undefined ? (unitPrice !== null && unitPrice !== "" ? Number(unitPrice) : null) : existing.unitPrice,
-        amountPaid: payState.amountPaid,
-        amountDue: payState.amountDue,
-        paymentStatus: payState.paymentStatus,
-      },
-      include: {
-        house: {
-          select: { id: true, name: true },
+    const updated = await prisma.$transaction(
+      async (tx) => {
+        // 1. Revert previous purchase movement if existed
+        const prevPurchase = existing.inventoryMovements.find((m) => m.type === "PURCHASE");
+      if (prevPurchase) {
+        const prevFeed = await tx.feedType.findUnique({ where: { id: prevPurchase.feedTypeId } });
+        if (prevFeed) {
+          await tx.feedType.update({
+            where: { id: prevFeed.id },
+            data: {
+              currentStock: Number(prevFeed.currentStock) - Number(prevPurchase.quantity),
+            },
+          });
+        }
+        await tx.inventoryMovement.delete({ where: { id: prevPurchase.id } });
+      }
+
+      // 2. Resolve feedType
+      const resolvedFeedTypeId =
+        feedTypeId !== undefined ? (feedTypeId ? Number(feedTypeId) : null) : existing.feedTypeId;
+      let feedType = null;
+      if (resolvedFeedTypeId) {
+        feedType = await tx.feedType.findUnique({ where: { id: resolvedFeedTypeId } });
+      }
+
+      const finalQty =
+        quantity !== undefined ? (quantity !== null && quantity !== "" ? Number(quantity) : null) : existing.quantity;
+      const finalUnit = unit !== undefined ? (unit ? unit.trim() : null) : existing.unit;
+
+      const exp = await tx.expense.update({
+        where: {
+          id: Number(id),
         },
-        breed: {
-          select: { id: true, name: true },
+        data: {
+          houseId: houseId !== undefined ? (houseId ? Number(houseId) : null) : existing.houseId,
+          flockId: flockId !== undefined ? (flockId ? Number(flockId) : null) : existing.flockId,
+          breedId: breedId !== undefined ? (breedId ? Number(breedId) : null) : existing.breedId,
+          supplierId: supplierId !== undefined ? (supplierId ? Number(supplierId) : null) : existing.supplierId,
+          feedTypeId: resolvedFeedTypeId,
+          category: category !== undefined ? category.trim() : existing.category,
+          amount: payState.amount,
+          date: date ? new Date(date) : existing.date,
+          description: description !== undefined ? (description ? description.trim() : null) : existing.description,
+          quantity: finalQty,
+          unit: finalUnit || (feedType ? feedType.unit : null),
+          unitPrice: unitPrice !== undefined ? (unitPrice !== null && unitPrice !== "" ? Number(unitPrice) : null) : existing.unitPrice,
+          amountPaid: payState.amountPaid,
+          amountDue: payState.amountDue,
+          paymentStatus: payState.paymentStatus,
         },
-        supplier: {
-          select: { id: true, name: true, phone: true, category: true },
+        include: {
+          house: {
+            select: { id: true, name: true },
+          },
+          flock: {
+            select: { id: true, name: true, purpose: true },
+          },
+          breed: {
+            select: { id: true, name: true },
+          },
+          supplier: {
+            select: { id: true, name: true, phone: true, category: true },
+          },
+          feedType: {
+            select: { id: true, name: true, unit: true, bagWeightKg: true },
+          },
         },
+      });
+
+      // 3. Apply new purchase movement if feedType & quantity > 0
+      if (feedType && finalQty && Number(finalQty) > 0) {
+        const freshFeed = await tx.feedType.findUnique({ where: { id: feedType.id } });
+        const purchaseQty = convertToFeedUnit(Number(finalQty), finalUnit, freshFeed);
+        const currentStock = Number(freshFeed.currentStock);
+        const newStock = currentStock + purchaseQty;
+        const effectiveUnitCost =
+          purchaseQty > 0 ? Number((payState.amount / purchaseQty).toFixed(2)) : Number(freshFeed.unitCost);
+
+        await tx.feedType.update({
+          where: { id: freshFeed.id },
+          data: {
+            currentStock: newStock,
+            unitCost: effectiveUnitCost > 0 ? effectiveUnitCost : freshFeed.unitCost,
+          },
+        });
+
+        await tx.inventoryMovement.create({
+          data: {
+            userId: req.user.id,
+            feedTypeId: freshFeed.id,
+            houseId: exp.houseId,
+            expenseId: exp.id,
+            type: "PURCHASE",
+            quantity: purchaseQty,
+            unit: freshFeed.unit,
+            unitCost: effectiveUnitCost,
+            totalCost: payState.amount,
+            balanceAfter: newStock,
+            date: exp.date,
+            reason: exp.supplier ? `Feed purchase from ${exp.supplier.name}` : "Feed purchase",
+          },
+        });
+      }
+
+        return exp;
       },
-    });
+      {
+        maxWait: 15000,
+        timeout: 30000,
+      }
+    );
 
     res.json({
       success: true,
@@ -424,42 +706,86 @@ const updateExpense = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (error.code === "UNSUPPORTED_UNIT" || error.code === "INVALID_BAG_WEIGHT") {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
     next(error);
   }
 };
 
 /**
- * Deletes an existing expense record, verifying ownership.
+ * Deletes an existing expense record, verifying ownership and restoring inventory.
  */
 const deleteExpense = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const existing = await prisma.expense.findFirst({
-      where: {
-        id: Number(id),
-        userId: req.user.id,
-      },
-    });
+    await prisma.$transaction(
+      async (tx) => {
+        const existing = await tx.expense.findFirst({
+          where: {
+            id: Number(id),
+            userId: req.user.id,
+          },
+          include: {
+            inventoryMovements: true,
+          },
+        });
 
-    if (!existing) {
-      return res.status(404).json({
-        success: false,
-        message: "Expense record not found",
-      });
-    }
+      if (!existing) {
+        const error = new Error("Expense record not found");
+        error.code = "NOT_FOUND";
+        throw error;
+      }
 
-    await prisma.expense.delete({
-      where: {
-        id: Number(id),
+      // Revert any purchase movements
+      const purchaseMovements = existing.inventoryMovements.filter(
+        (m) => m.type === "PURCHASE"
+      );
+
+      for (const mov of purchaseMovements) {
+        const feed = await tx.feedType.findUnique({
+          where: { id: mov.feedTypeId },
+        });
+        if (feed) {
+          await tx.feedType.update({
+            where: { id: feed.id },
+            data: {
+              currentStock: Number(feed.currentStock) - Number(mov.quantity),
+            },
+          });
+        }
+        await tx.inventoryMovement.delete({
+          where: { id: mov.id },
+        });
+      }
+
+        await tx.expense.delete({
+          where: {
+            id: Number(id),
+          },
+        });
       },
-    });
+      {
+        maxWait: 15000,
+        timeout: 30000,
+      }
+    );
 
     res.json({
       success: true,
       message: "Expense record deleted successfully",
     });
   } catch (error) {
+    if (error.code === "NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+    }
     next(error);
   }
 };
@@ -475,6 +801,7 @@ const createIncome = async (req, res, next) => {
   try {
     const {
       houseId,
+      flockId,
       breedId,
       customerId,
       category,
@@ -488,7 +815,7 @@ const createIncome = async (req, res, next) => {
       paymentStatus,
     } = req.body;
 
-    const check = await validateOwnership(req.user.id, houseId, breedId, customerId, null);
+    const check = await validateOwnership(req.user.id, houseId, breedId, customerId, null, null, flockId);
     if (!check.valid) {
       return res.status(check.status).json({
         success: false,
@@ -508,6 +835,7 @@ const createIncome = async (req, res, next) => {
       data: {
         userId: req.user.id,
         houseId: houseId ? Number(houseId) : null,
+        flockId: flockId ? Number(flockId) : null,
         breedId: breedId ? Number(breedId) : null,
         customerId: customerId ? Number(customerId) : null,
         category: category.trim(),
@@ -524,6 +852,9 @@ const createIncome = async (req, res, next) => {
       include: {
         house: {
           select: { id: true, name: true },
+        },
+        flock: {
+          select: { id: true, name: true, purpose: true },
         },
         breed: {
           select: { id: true, name: true },
@@ -556,7 +887,7 @@ const createIncome = async (req, res, next) => {
  */
 const getIncome = async (req, res, next) => {
   try {
-    const { houseId, customerId, category, paymentStatus, startDate, endDate } = req.query;
+    const { houseId, flockId, customerId, category, paymentStatus, startDate, endDate } = req.query;
 
     const where = {
       userId: req.user.id,
@@ -564,6 +895,10 @@ const getIncome = async (req, res, next) => {
 
     if (houseId) {
       where.houseId = Number(houseId);
+    }
+
+    if (flockId) {
+      where.flockId = Number(flockId);
     }
 
     if (customerId) {
@@ -597,6 +932,9 @@ const getIncome = async (req, res, next) => {
       include: {
         house: {
           select: { id: true, name: true },
+        },
+        flock: {
+          select: { id: true, name: true, purpose: true },
         },
         breed: {
           select: { id: true, name: true },
@@ -642,6 +980,9 @@ const getIncomeById = async (req, res, next) => {
         house: {
           select: { id: true, name: true },
         },
+        flock: {
+          select: { id: true, name: true, purpose: true },
+        },
         breed: {
           select: { id: true, name: true },
         },
@@ -682,6 +1023,7 @@ const updateIncome = async (req, res, next) => {
     const { id } = req.params;
     const {
       houseId,
+      flockId,
       breedId,
       customerId,
       category,
@@ -709,7 +1051,17 @@ const updateIncome = async (req, res, next) => {
       });
     }
 
-    const check = await validateOwnership(req.user.id, houseId, breedId, customerId, null);
+    const targetHouseId = houseId !== undefined ? (houseId ? Number(houseId) : null) : existing.houseId;
+    const targetFlockId = flockId !== undefined ? (flockId ? Number(flockId) : null) : existing.flockId;
+    const check = await validateOwnership(
+      req.user.id,
+      targetHouseId,
+      breedId !== undefined ? breedId : existing.breedId,
+      customerId !== undefined ? customerId : existing.customerId,
+      null,
+      null,
+      targetFlockId
+    );
     if (!check.valid) {
       return res.status(check.status).json({
         success: false,
@@ -728,6 +1080,7 @@ const updateIncome = async (req, res, next) => {
       },
       data: {
         houseId: houseId !== undefined ? (houseId ? Number(houseId) : null) : existing.houseId,
+        flockId: flockId !== undefined ? (flockId ? Number(flockId) : null) : existing.flockId,
         breedId: breedId !== undefined ? (breedId ? Number(breedId) : null) : existing.breedId,
         customerId: customerId !== undefined ? (customerId ? Number(customerId) : null) : existing.customerId,
         category: category !== undefined ? category.trim() : existing.category,
@@ -744,6 +1097,9 @@ const updateIncome = async (req, res, next) => {
       include: {
         house: {
           select: { id: true, name: true },
+        },
+        flock: {
+          select: { id: true, name: true, purpose: true },
         },
         breed: {
           select: { id: true, name: true },
@@ -946,6 +1302,7 @@ const getFinancialTransactions = async (req, res, next) => {
       type, // 'all' | 'expense' | 'income'
       category,
       houseId,
+      flockId,
       customerId,
       supplierId,
       paymentStatus,
@@ -960,6 +1317,7 @@ const getFinancialTransactions = async (req, res, next) => {
     const baseWhere = {
       userId,
       ...(houseId ? { houseId: Number(houseId) } : {}),
+      ...(flockId ? { flockId: Number(flockId) } : {}),
       ...(category ? { category: String(category) } : {}),
       ...(paymentStatus
         ? paymentStatus === "UNSETTLED" || paymentStatus === "OUTSTANDING"
@@ -991,8 +1349,10 @@ const getFinancialTransactions = async (req, res, next) => {
         where: expWhere,
         include: {
           house: { select: { id: true, name: true } },
+          flock: { select: { id: true, name: true, purpose: true } },
           breed: { select: { id: true, name: true } },
           supplier: { select: { id: true, name: true, phone: true } },
+          feedType: { select: { id: true, name: true, unit: true } },
         },
       });
     }
@@ -1007,6 +1367,7 @@ const getFinancialTransactions = async (req, res, next) => {
         where: incWhere,
         include: {
           house: { select: { id: true, name: true } },
+          flock: { select: { id: true, name: true, purpose: true } },
           breed: { select: { id: true, name: true } },
           customer: { select: { id: true, name: true, phone: true } },
         },
@@ -1023,10 +1384,14 @@ const getFinancialTransactions = async (req, res, next) => {
         description: e.description,
         houseId: e.houseId,
         house: e.house,
+        flockId: e.flockId,
+        flock: e.flock,
         breedId: e.breedId,
         breed: e.breed,
         supplierId: e.supplierId,
         supplier: e.supplier,
+        feedTypeId: e.feedTypeId,
+        feedType: e.feedType,
         quantity: e.quantity ? Number(e.quantity) : null,
         unit: e.unit,
         unitPrice: e.unitPrice ? Number(e.unitPrice) : null,
@@ -1045,6 +1410,8 @@ const getFinancialTransactions = async (req, res, next) => {
         description: i.description,
         houseId: i.houseId,
         house: i.house,
+        flockId: i.flockId,
+        flock: i.flock,
         breedId: i.breedId,
         breed: i.breed,
         customerId: i.customerId,

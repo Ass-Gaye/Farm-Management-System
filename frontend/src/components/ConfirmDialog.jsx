@@ -1,6 +1,7 @@
 import { AlertTriangleIcon } from "./Icons";
 
 function ConfirmDialog({
+  isOpen = true,
   title,
   message,
   confirmText = "Delete",
@@ -8,7 +9,10 @@ function ConfirmDialog({
   onConfirm,
   onCancel,
   loading = false,
+  confirmDisabled = false,
 }) {
+  if (!isOpen) return null;
+
   return (
     <div className="dialog-overlay">
       <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
@@ -34,7 +38,7 @@ function ConfirmDialog({
             type="button"
             className="danger-button"
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
           >
             {loading ? "Deleting..." : confirmText}
           </button>

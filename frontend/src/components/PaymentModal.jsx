@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { updateIncome, updateExpense } from "../services/api";
 import { formatCurrency, DEFAULT_CURRENCY } from "../services/currency";
 
@@ -16,20 +16,11 @@ function PaymentModal({
   const alreadyPaid = Number(item?.amountPaid || 0);
   const balanceDue = Number(item?.amountDue || Math.max(0, totalAmount - alreadyPaid));
 
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0]);
+  const [paymentAmount, setPaymentAmount] = useState(() => (item ? String(balanceDue) : ""));
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (isOpen && item) {
-      setPaymentAmount(String(balanceDue));
-      setPaymentDate(new Date().toISOString().split("T")[0]);
-      setNote("");
-      setError("");
-    }
-  }, [isOpen, item, balanceDue]);
 
   if (!isOpen || !item) return null;
 
