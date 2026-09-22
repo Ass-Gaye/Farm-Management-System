@@ -63,6 +63,11 @@ const validateSlaughterPlan = async ({
     },
     include: {
       dailyRecords: true,
+      flocks: {
+        include: {
+          depopulationEvents: { select: { quantity: true } },
+        },
+      },
     },
   });
 
@@ -76,7 +81,12 @@ const validateSlaughterPlan = async ({
     (sum, record) => sum + record.mortality,
     0
   );
-  const currentBirdsInHouse = house.birdsPlaced - totalMortality;
+  const totalDepopulated = (house.flocks || []).reduce(
+    (total, flock) =>
+      total + (flock.depopulationEvents || []).reduce((sum, e) => sum + e.quantity, 0),
+    0
+  );
+  const currentBirdsInHouse = Math.max(0, house.birdsPlaced - totalMortality - totalDepopulated);
 
   if (breedId) {
     const breed = await prisma.breed.findFirst({
@@ -399,6 +409,73 @@ const toggleSlaughterPlanComplete = async (req, res, next) => {
         breed: true,
       },
     });
+
+    // Slaughter depopulation event integration
+    let targetFlockId = existingPlan.flockId;
+    if (!targetFlockId) {
+      const activeFlock = await prisma.flock.findFirst({
+        where: { houseId: existingPlan.houseId, userId: req.user.id, status: "ACTIVE" },
+      });
+      if (activeFlock) {
+        targetFlockId = activeFlock.id;
+      }
+    }
+
+    if (targetFlockId) {
+      const { calculateLiveBirds } = require("./depopulation.controller");
+      if (newStatus === "Completed") {
+        const existingEvent = await prisma.depopulationEvent.findFirst({
+          where: {
+            userId: req.user.id,
+            flockId: targetFlockId,
+            reason: "SLAUGHTERED",
+            notes: `Slaughter plan #${existingPlan.id} completed`,
+          },
+        });
+
+        if (!existingEvent) {
+          const birdStats = await calculateLiveBirds(targetFlockId);
+          const qtyToDepopulate = Math.min(existingPlan.numberOfBirds, birdStats?.liveBirds || 0);
+
+          if (qtyToDepopulate > 0) {
+            await prisma.depopulationEvent.create({
+              data: {
+                userId: req.user.id,
+                flockId: targetFlockId,
+                quantity: qtyToDepopulate,
+                reason: "SLAUGHTERED",
+                date: new Date(),
+                notes: `Slaughter plan #${existingPlan.id} completed`,
+              },
+            });
+
+            const updatedStats = await calculateLiveBirds(targetFlockId);
+            await prisma.flock.update({
+              where: { id: targetFlockId },
+              data: { currentBirds: updatedStats.liveBirds },
+            });
+          }
+        }
+      } else {
+        // Toggled back from completed - remove completion event
+        const deleted = await prisma.depopulationEvent.deleteMany({
+          where: {
+            userId: req.user.id,
+            flockId: targetFlockId,
+            reason: "SLAUGHTERED",
+            notes: `Slaughter plan #${existingPlan.id} completed`,
+          },
+        });
+
+        if (deleted.count > 0) {
+          const updatedStats = await calculateLiveBirds(targetFlockId);
+          await prisma.flock.update({
+            where: { id: targetFlockId },
+            data: { currentBirds: updatedStats.liveBirds },
+          });
+        }
+      }
+    }
 
     res.json({
       success: true,

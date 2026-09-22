@@ -1534,6 +1534,14 @@ tbody tr:last-child td {
   padding: 32px 5% 64px;
 }
 
+.depopulation-form-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow-y: auto;
+  background: var(--bg-app);
+}
+
 .fullscreen-form-inner {
   width: 100%;
   max-width: 680px;

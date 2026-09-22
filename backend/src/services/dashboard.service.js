@@ -42,6 +42,13 @@ const getHouseDashboard = async (houseId, userId) => {
           expectedSlaughterDate: "asc",
         },
       },
+      flocks: {
+        include: {
+          depopulationEvents: {
+            select: { quantity: true },
+          },
+        },
+      },
     },
   });
 
@@ -65,7 +72,14 @@ const getHouseDashboard = async (houseId, userId) => {
     0
   );
 
-  const currentBirds = house.birdsPlaced - totalMortality;
+  // Sum depopulation events across all flocks in this house
+  const totalDepopulated = (house.flocks || []).reduce(
+    (total, flock) =>
+      total + (flock.depopulationEvents || []).reduce((sum, e) => sum + e.quantity, 0),
+    0
+  );
+
+  const currentBirds = house.birdsPlaced - totalMortality - totalDepopulated;
 
   // Breeds aggregations
   const totalBreeds = house.breeds.length;

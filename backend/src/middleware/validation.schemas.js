@@ -1185,6 +1185,62 @@ const houseIdParamSchema = z.object({
   houseId: z.coerce.number().int().positive(),
 });
 
+const flockIdParamSchema = z.object({
+  flockId: z.coerce.number().int().positive(),
+});
+
+const depopulationParamsSchema = z.object({
+  flockId: z.coerce.number().int().positive(),
+  id: z.coerce.number().int().positive(),
+});
+
+const DEPOPULATION_REASONS = [
+  "SOLD",
+  "SLAUGHTERED",
+  "CULLED",
+  "TRANSFERRED",
+  "OTHER",
+];
+
+const createDepopulationEventSchema = z.object({
+  flockId: z.coerce.number().int().positive("Flock ID must be a positive integer").optional(),
+  quantity: z
+    .number({ invalid_type_error: "Quantity must be a number" })
+    .int("Quantity must be a whole number")
+    .positive("Quantity must be greater than 0"),
+  reason: z.enum(DEPOPULATION_REASONS, {
+    errorMap: () => ({ message: `Reason must be one of: ${DEPOPULATION_REASONS.join(", ")}` }),
+  }),
+  date: z
+    .union([
+      z.string().refine((val) => !isNaN(Date.parse(val)), "Date must be a valid ISO date"),
+      z.date(),
+    ]),
+  notes: z.string().max(500, "Notes cannot exceed 500 characters").optional().nullable(),
+  incomeId: z.coerce.number().int().positive().optional().nullable(),
+});
+
+const updateDepopulationEventSchema = z.object({
+  quantity: z
+    .number({ invalid_type_error: "Quantity must be a number" })
+    .int("Quantity must be a whole number")
+    .positive("Quantity must be greater than 0")
+    .optional(),
+  reason: z
+    .enum(DEPOPULATION_REASONS, {
+      errorMap: () => ({ message: `Reason must be one of: ${DEPOPULATION_REASONS.join(", ")}` }),
+    })
+    .optional(),
+  date: z
+    .union([
+      z.string().refine((val) => !isNaN(Date.parse(val)), "Date must be a valid ISO date"),
+      z.date(),
+    ])
+    .optional(),
+  notes: z.string().max(500, "Notes cannot exceed 500 characters").optional().nullable(),
+  incomeId: z.coerce.number().int().positive().optional().nullable(),
+});
+
 module.exports = {
   registerSchema,
   loginSchema,
@@ -1220,4 +1276,9 @@ module.exports = {
   stockAdjustmentSchema,
   idParamSchema,
   houseIdParamSchema,
+  flockIdParamSchema,
+  depopulationParamsSchema,
+  DEPOPULATION_REASONS,
+  createDepopulationEventSchema,
+  updateDepopulationEventSchema,
 };

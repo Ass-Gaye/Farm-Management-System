@@ -9,15 +9,23 @@ import { exportToCsv } from "../utils/exportCsv";
 
 function DailyRecordsPage() {
   const navigate = useNavigate();
-  const { records, selectedHouse, setConfirmDialog } = useFarm();
+  const { records, flocks, selectedHouse, setConfirmDialog } = useFarm();
 
   const [dateFilter, setDateFilter] = useState("");
+  const [flockFilter, setFlockFilter] = useState("ALL");
   const [sortOrder, setSortOrder] = useState("newest"); // "newest" | "oldest"
 
   const filteredAndSortedRecords = [...records]
     .filter((record) => {
-      if (!dateFilter) return true;
-      return record.date && record.date.includes(dateFilter);
+      if (dateFilter && (!record.date || !record.date.includes(dateFilter))) return false;
+      if (flockFilter !== "ALL") {
+        if (flockFilter === "NONE") {
+          if (record.flockId) return false;
+        } else if (String(record.flockId) !== String(flockFilter)) {
+          return false;
+        }
+      }
+      return true;
     })
     .sort((a, b) => {
       const dateA = new Date(a.date).getTime();
@@ -70,7 +78,7 @@ function DailyRecordsPage() {
       <PageHeader
         eyebrow={selectedHouse ? `Poultry House: ${selectedHouse.name}` : undefined}
         title="Daily Production Records"
-        description="Track mortality, feed usage in kilograms, and daily eggs collected."
+        description="Track mortality, feed usage in kilograms, bird weights, and daily eggs collected."
         actions={
           <div style={{ display: "flex", gap: "8px" }}>
             <button
@@ -94,8 +102,8 @@ function DailyRecordsPage() {
       />
 
       <div className="records-section">
-        {/* Section Toolbar with Date Filter and Sorting */}
-        <div className="section-toolbar">
+        {/* Section Toolbar with Date Filter, Flock Filter, and Sorting */}
+        <div className="section-toolbar" style={{ flexWrap: "wrap", gap: 12 }}>
           <div className="search-input-wrapper">
             <label
               htmlFor="record-date-filter"
@@ -105,7 +113,7 @@ function DailyRecordsPage() {
                 color: "var(--text-secondary)",
               }}
             >
-              Filter by Date:
+              Date:
             </label>
             <input
               id="record-date-filter"
@@ -125,7 +133,37 @@ function DailyRecordsPage() {
             )}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {flocks && flocks.length > 0 && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label
+                htmlFor="record-flock-filter"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Flock:
+              </label>
+              <select
+                id="record-flock-filter"
+                value={flockFilter}
+                onChange={(e) => setFlockFilter(e.target.value)}
+                className="table-filter-input"
+                style={{ padding: "4px 8px" }}
+              >
+                <option value="ALL">All Batches</option>
+                <option value="NONE">Whole House Only</option>
+                {flocks.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name} ({f.purpose} · {f.status})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
             <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
               {filteredAndSortedRecords.length} record{filteredAndSortedRecords.length === 1 ? "" : "s"}
             </span>
@@ -146,16 +184,19 @@ function DailyRecordsPage() {
         {filteredAndSortedRecords.length === 0 ? (
           <EmptyState
             icon="📋"
-            title={dateFilter ? "No matching records" : "No daily records yet"}
+            title={dateFilter || flockFilter !== "ALL" ? "No matching records" : "No daily records yet"}
             message={
-              dateFilter
-                ? `No production entries found matching date "${dateFilter}".`
+              dateFilter || flockFilter !== "ALL"
+                ? "No production entries found matching your filter criteria."
                 : "No daily records have been logged for this poultry house yet."
             }
-            actionText={dateFilter ? "Clear Date Filter" : "+ Add First Daily Record"}
+            actionText={dateFilter || flockFilter !== "ALL" ? "Reset Filters" : "+ Add First Daily Record"}
             onAction={
-              dateFilter
-                ? () => setDateFilter("")
+              dateFilter || flockFilter !== "ALL"
+                ? () => {
+                    setDateFilter("");
+                    setFlockFilter("ALL");
+                  }
                 : () => navigate("/daily-records/new")
             }
           />

@@ -447,5 +447,24 @@ export function VaccineIcon({ className = "", size = 16 }) {
   );
 }
 
-
-
+export function DepopulationIcon({ className = "", size = 16 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M16 3h5v5" />
+      <path d="M8 21H3v-5" />
+      <path d="M21 3l-7.5 7.5" />
+      <path d="M3 21l7.5-7.5" />
+    </svg>
+  );
+}

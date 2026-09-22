@@ -79,6 +79,10 @@ const createDailyRecord = async (req, res, next) => {
             id: Number(flockId),
             userId: req.user.id,
           },
+          include: {
+            dailyRecords: { select: { mortality: true } },
+            depopulationEvents: { select: { quantity: true } },
+          },
         });
         if (!flock) {
           const error = new Error("Flock not found or does not belong to your farm");
@@ -126,9 +130,12 @@ const createDailyRecord = async (req, res, next) => {
 
       // Validate mortality against flock or house bird count
       if (flock) {
-        if (mortality > flock.currentBirds) {
+        const flockMortality = flock.dailyRecords.reduce((sum, r) => sum + r.mortality, 0);
+        const flockDepopulated = flock.depopulationEvents.reduce((sum, e) => sum + e.quantity, 0);
+        const liveBirds = Math.max(0, flock.birdsPlaced - flockMortality - flockDepopulated);
+        if (mortality > liveBirds) {
           const error = new Error(
-            `Mortality cannot exceed the flock's current number of birds (${flock.currentBirds})`
+            `Mortality cannot exceed the flock's current number of birds (${liveBirds})`
           );
           error.code = "MORTALITY_LIMIT";
           throw error;
@@ -167,11 +174,13 @@ const createDailyRecord = async (req, res, next) => {
         },
       });
 
-      if (flock && mortality > 0) {
+      if (flock) {
+        const flockMortality = flock.dailyRecords.reduce((sum, r) => sum + r.mortality, 0) + mortality;
+        const flockDepopulated = flock.depopulationEvents.reduce((sum, e) => sum + e.quantity, 0);
         await transaction.flock.update({
           where: { id: flock.id },
           data: {
-            currentBirds: Math.max(0, flock.currentBirds - mortality),
+            currentBirds: Math.max(0, flock.birdsPlaced - flockMortality - flockDepopulated),
           },
         });
       }
@@ -393,6 +402,10 @@ const updateDailyRecord = async (req, res, next) => {
             id: resolvedFlockId,
             userId: req.user.id,
           },
+          include: {
+            dailyRecords: { select: { id: true, mortality: true } },
+            depopulationEvents: { select: { quantity: true } },
+          },
         });
         if (!flock) {
           const error = new Error("Flock not found or does not belong to your farm");
@@ -409,9 +422,11 @@ const updateDailyRecord = async (req, res, next) => {
       const finalMortality = mortality !== undefined ? Number(mortality) : existingRecord.mortality;
 
       if (flock) {
-        const previousRecordMortalityInFlock =
-          existingRecord.flockId === flock.id ? existingRecord.mortality : 0;
-        const availableInFlock = flock.currentBirds + previousRecordMortalityInFlock;
+        const otherMortality = flock.dailyRecords
+          .filter((r) => r.id !== Number(id))
+          .reduce((sum, r) => sum + r.mortality, 0);
+        const flockDepopulated = flock.depopulationEvents.reduce((sum, e) => sum + e.quantity, 0);
+        const availableInFlock = Math.max(0, flock.birdsPlaced - otherMortality - flockDepopulated);
         if (finalMortality > availableInFlock) {
           const error = new Error(
             `Mortality cannot exceed the flock's available birds (${availableInFlock})`
@@ -526,21 +541,36 @@ const updateDailyRecord = async (req, res, next) => {
         });
       }
 
-      // Revert previous flock mortality if attached
-      if (existingRecord.flockId && existingRecord.mortality > 0) {
-        await transaction.flock.update({
+      // Re-sync previous flock's currentBirds if flock changed
+      if (existingRecord.flockId && existingRecord.flockId !== resolvedFlockId) {
+        const prevFlock = await transaction.flock.findUnique({
           where: { id: existingRecord.flockId },
-          data: {
-            currentBirds: { increment: existingRecord.mortality },
+          include: {
+            dailyRecords: { select: { id: true, mortality: true } },
+            depopulationEvents: { select: { quantity: true } },
           },
         });
+        if (prevFlock) {
+          const prevMortality = prevFlock.dailyRecords
+            .filter((r) => r.id !== Number(id))
+            .reduce((sum, r) => sum + r.mortality, 0);
+          const prevDepop = prevFlock.depopulationEvents.reduce((sum, e) => sum + e.quantity, 0);
+          await transaction.flock.update({
+            where: { id: prevFlock.id },
+            data: { currentBirds: Math.max(0, prevFlock.birdsPlaced - prevMortality - prevDepop) },
+          });
+        }
       }
 
-      if (resolvedFlockId && finalMortality > 0) {
+      if (resolvedFlockId && flock) {
+        const otherMort = flock.dailyRecords
+          .filter((r) => r.id !== Number(id))
+          .reduce((sum, r) => sum + r.mortality, 0);
+        const totalDepop = flock.depopulationEvents.reduce((sum, e) => sum + e.quantity, 0);
         await transaction.flock.update({
           where: { id: resolvedFlockId },
           data: {
-            currentBirds: { decrement: finalMortality },
+            currentBirds: Math.max(0, flock.birdsPlaced - otherMort - finalMortality - totalDepop),
           },
         });
       }
@@ -676,14 +706,27 @@ const deleteDailyRecord = async (req, res, next) => {
         });
       }
 
-      // Revert flock mortality if the record had a flock and mortality > 0
-      if (record.flockId && record.mortality > 0) {
-        await tx.flock.update({
+      // Re-sync flock currentBirds if the record had a flock
+      if (record.flockId) {
+        const flockToUpdate = await tx.flock.findUnique({
           where: { id: record.flockId },
-          data: {
-            currentBirds: { increment: record.mortality },
+          include: {
+            dailyRecords: { select: { id: true, mortality: true } },
+            depopulationEvents: { select: { quantity: true } },
           },
         });
+        if (flockToUpdate) {
+          const remainingMortality = flockToUpdate.dailyRecords
+            .filter((r) => r.id !== Number(id))
+            .reduce((sum, r) => sum + r.mortality, 0);
+          const totalDepop = flockToUpdate.depopulationEvents.reduce((sum, e) => sum + e.quantity, 0);
+          await tx.flock.update({
+            where: { id: record.flockId },
+            data: {
+              currentBirds: Math.max(0, flockToUpdate.birdsPlaced - remainingMortality - totalDepop),
+            },
+          });
+        }
       }
 
       await tx.dailyRecord.delete({

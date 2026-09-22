@@ -593,3 +593,40 @@ export const deleteVaccination = async (id) => {
     method: "DELETE",
   });
 };
+
+// ==================== Depopulation Events ====================
+
+export const getDepopulationEvents = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/depopulation-events${queryString}`);
+};
+
+export const getDepopulationEventById = async (id) => {
+  return request(`/depopulation-events/${id}`);
+};
+
+export const createDepopulationEvent = async (data) => {
+  return request("/depopulation-events", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+};
+
+export const updateDepopulationEvent = async (id, data) => {
+  return request(`/depopulation-events/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+};
+
+export const deleteDepopulationEvent = async (id) => {
+  return request(`/depopulation-events/${id}`, {
+    method: "DELETE",
+  });
+};

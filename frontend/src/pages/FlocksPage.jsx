@@ -307,6 +307,11 @@ function FlocksPage() {
                           <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                             of {flock.birdsPlaced} placed
                           </div>
+                          {flock.totalDepopulated > 0 && (
+                            <div style={{ fontSize: 10, color: "#9333ea", fontWeight: 600 }}>
+                              −{flock.totalDepopulated} depopulated
+                            </div>
+                          )}
                         </td>
                         <td>
                           <div
@@ -366,6 +371,15 @@ function FlocksPage() {
                         </td>
                         <td style={{ textAlign: "right" }}>
                           <div className="record-actions" style={{ justifyContent: "flex-end", gap: 6 }}>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              style={{ padding: "4px 8px", fontSize: 11 }}
+                              title="Record bird sales, harvest, or culls"
+                              onClick={() => navigate(`/depopulation?flockId=${flock.id}`)}
+                            >
+                              🚚 Depopulate
+                            </button>
                             <button
                               type="button"
                               className="secondary-button"

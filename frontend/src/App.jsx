@@ -21,6 +21,7 @@ import InventoryPage from "./pages/InventoryPage";
 import FlocksPage from "./pages/FlocksPage";
 import FlockFormPage from "./pages/FlockFormPage";
 import VaccinationsPage from "./pages/VaccinationsPage";
+import DepopulationPage from "./pages/DepopulationPage";
 
 import "./App.css";
 
@@ -59,6 +60,8 @@ function AppContent() {
         <Route path="/flocks" element={<FlocksPage />} />
         <Route path="/flocks/new" element={<FlockFormPage />} />
         <Route path="/flocks/:id/edit" element={<FlockFormPage />} />
+        <Route path="/depopulation" element={<DepopulationPage />} />
+        <Route path="/depopulation-events" element={<DepopulationPage />} />
 
         {/* 3. Daily Records */}
         <Route path="/daily-records" element={<DailyRecordsPage />} />
@@ -98,6 +101,8 @@ function AppContent() {
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="flocks" element={<FlocksPage />} />
+          <Route path="depopulation" element={<DepopulationPage />} />
+          <Route path="depopulation-events" element={<DepopulationPage />} />
           <Route path="daily-records" element={<DailyRecordsPage />} />
           <Route path="vaccinations" element={<VaccinationsPage />} />
           <Route path="breeds" element={<BreedsPage />} />

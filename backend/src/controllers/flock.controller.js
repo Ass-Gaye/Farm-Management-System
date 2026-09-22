@@ -149,12 +149,16 @@ const getFlocks = async (req, res, next) => {
             date: true,
           },
         },
+        depopulationEvents: {
+          select: { quantity: true },
+        },
       },
       orderBy: { placementDate: "desc" },
     });
 
     const enriched = flocks.map((flock) => {
       const totalMortality = flock.dailyRecords.reduce((sum, r) => sum + r.mortality, 0);
+      const totalDepopulated = (flock.depopulationEvents || []).reduce((sum, e) => sum + e.quantity, 0);
       const totalFeedUsedKg = flock.dailyRecords.reduce((sum, r) => sum + r.feedUsedKg, 0);
       const totalEggs = flock.dailyRecords.reduce((sum, r) => sum + r.eggsCollected, 0);
       const mortalityRate =
@@ -162,7 +166,7 @@ const getFlocks = async (req, res, next) => {
           ? Number(((totalMortality / flock.birdsPlaced) * 100).toFixed(2))
           : 0;
 
-      const liveBirds = Math.max(0, flock.birdsPlaced - totalMortality);
+      const liveBirds = Math.max(0, flock.birdsPlaced - totalMortality - totalDepopulated);
 
       // Latest recorded average bird weight
       const recordsWithWeight = flock.dailyRecords
@@ -199,6 +203,7 @@ const getFlocks = async (req, res, next) => {
         birdsPlaced: flock.birdsPlaced,
         currentBirds: liveBirds,
         totalMortality,
+        totalDepopulated,
         mortalityRate,
         totalFeedUsedKg: Number(totalFeedUsedKg.toFixed(2)),
         totalEggs,
@@ -258,6 +263,12 @@ const getFlockById = async (req, res, next) => {
         income: {
           orderBy: { date: "desc" },
         },
+        depopulationEvents: {
+          include: {
+            income: { select: { id: true, amount: true, category: true } },
+          },
+          orderBy: { date: "desc" },
+        },
       },
     });
 
@@ -270,9 +281,10 @@ const getFlockById = async (req, res, next) => {
 
     // Performance Calculations
     const totalMortality = flock.dailyRecords.reduce((sum, r) => sum + r.mortality, 0);
+    const totalDepopulated = (flock.depopulationEvents || []).reduce((sum, e) => sum + e.quantity, 0);
     const totalFeedKg = flock.dailyRecords.reduce((sum, r) => sum + r.feedUsedKg, 0);
     const totalEggs = flock.dailyRecords.reduce((sum, r) => sum + r.eggsCollected, 0);
-    const liveBirds = Math.max(0, flock.birdsPlaced - totalMortality);
+    const liveBirds = Math.max(0, flock.birdsPlaced - totalMortality - totalDepopulated);
 
     const mortalityRate =
       flock.birdsPlaced > 0
@@ -346,6 +358,7 @@ const getFlockById = async (req, res, next) => {
         age: calculateFlockAge(flock.placementDate),
         performance: {
           totalMortality,
+          totalDepopulated,
           mortalityRate,
           totalFeedKg: Number(totalFeedKg.toFixed(2)),
           avgDailyFeedKg,
@@ -375,6 +388,7 @@ const getFlockById = async (req, res, next) => {
         slaughterPlans: flock.slaughterPlans,
         expenses: flock.expenses,
         income: flock.income,
+        depopulationEvents: flock.depopulationEvents,
       },
     });
   } catch (error) {
@@ -405,7 +419,10 @@ const updateFlock = async (req, res, next) => {
 
     const existingFlock = await prisma.flock.findFirst({
       where: { id: Number(id), userId },
-      include: { dailyRecords: true },
+      include: {
+        dailyRecords: true,
+        depopulationEvents: { select: { quantity: true } },
+      },
     });
 
     if (!existingFlock) {
@@ -416,13 +433,14 @@ const updateFlock = async (req, res, next) => {
     }
 
     const totalMortality = existingFlock.dailyRecords.reduce((sum, r) => sum + r.mortality, 0);
+    const totalDepopulated = (existingFlock.depopulationEvents || []).reduce((sum, e) => sum + e.quantity, 0);
 
     const newBirdsPlaced = birdsPlaced !== undefined ? Number(birdsPlaced) : existingFlock.birdsPlaced;
 
-    if (newBirdsPlaced < totalMortality) {
+    if (newBirdsPlaced < totalMortality + totalDepopulated) {
       return res.status(400).json({
         success: false,
-        message: `Birds placed (${newBirdsPlaced}) cannot be less than recorded mortality (${totalMortality})`,
+        message: `Birds placed (${newBirdsPlaced}) cannot be less than recorded mortality (${totalMortality}) + depopulated birds (${totalDepopulated})`,
       });
     }
 
@@ -435,7 +453,7 @@ const updateFlock = async (req, res, next) => {
         batchNumber: batchNumber !== undefined ? (batchNumber ? batchNumber.trim() : null) : existingFlock.batchNumber,
         purpose: purpose !== undefined ? purpose : existingFlock.purpose,
         birdsPlaced: newBirdsPlaced,
-        currentBirds: Math.max(0, newBirdsPlaced - totalMortality),
+        currentBirds: Math.max(0, newBirdsPlaced - totalMortality - totalDepopulated),
         placementDate: placementDate ? new Date(placementDate) : existingFlock.placementDate,
         expectedMarketDate:
           expectedMarketDate !== undefined

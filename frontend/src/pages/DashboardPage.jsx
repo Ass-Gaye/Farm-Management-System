@@ -31,6 +31,7 @@ function DashboardPage() {
 
   const [financeSummary, setFinanceSummary] = useState(null);
   const [inventorySummary, setInventorySummary] = useState(null);
+  const [todayMidnight] = useState(() => new Date().setHours(0, 0, 0, 0));
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +88,14 @@ function DashboardPage() {
     (slaughterSummary.overdue || 0) +
     (slaughterSummary.dueToday || 0) +
     (slaughterSummary.dueSoon || 0);
+
+  const activeFlocks = flocks.filter((f) => f.status === "ACTIVE");
+  const threeDaysOut = todayMidnight + 3 * 24 * 60 * 60 * 1000;
+  const urgentVaccinations = vaccinations.filter((v) => {
+    if (v.status !== "PENDING") return false;
+    const schedTime = new Date(v.scheduledDate).getTime();
+    return schedTime <= threeDaysOut;
+  });
 
   const recentRecords = [...records]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
@@ -376,8 +385,78 @@ function DashboardPage() {
         </div>
       )}
 
+      {/* Urgent Immunization / Vaccination Alert */}
+      {urgentVaccinations.length > 0 && (
+        <div
+          className="alert-banner"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "#eff6ff",
+            border: "1px solid #bfdbfe",
+            color: "#1e40af",
+            padding: "12px 16px",
+            borderRadius: "8px",
+            marginBottom: "24px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <VaccineIcon size={20} />
+            <div>
+              <strong>Immunization Alert:</strong> {urgentVaccinations.length} vaccination{urgentVaccinations.length === 1 ? " is" : "s are"} due within the next 72 hours or overdue.
+            </div>
+          </div>
+          <Link to="/vaccinations" className="primary-button" style={{ padding: "6px 14px", fontSize: "13px", textDecoration: "none" }}>
+            View Schedule
+          </Link>
+        </div>
+      )}
+
       {/* Operational Summary Cards */}
       <div className="dashboard-summary-columns">
+        {/* Active Flocks / Batches Card */}
+        <div className="summary-card">
+          <div className="summary-card-header">
+            <h4>Active Batches / Flocks</h4>
+            <Link to="/flocks" className="link-subtle">View All ({flocks.length}) →</Link>
+          </div>
+          {activeFlocks.length === 0 ? (
+            <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "16px 0" }}>
+              No active flocks in this house. <Link to="/flocks/new">Start a batch →</Link>
+            </p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+              {activeFlocks.map((flock) => (
+                <div
+                  key={flock.id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "8px 12px",
+                    background: "var(--bg-muted)",
+                    borderRadius: 6,
+                  }}
+                >
+                  <div>
+                    <strong>{flock.name}</strong>
+                    <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                      {flock.purpose} · {flock.age?.formatted || "Just placed"}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <strong style={{ fontSize: 13 }}>{flock.currentBirds} live</strong>
+                    <div style={{ fontSize: 11, color: flock.totalMortality > 0 ? "var(--alert-danger)" : "var(--text-muted)" }}>
+                      {flock.mortalityRate}% loss {flock.fcr ? `· FCR ${flock.fcr}` : ""} {flock.latestLayingRate !== null ? `· ${flock.latestLayingRate}% lay` : ""}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Health Breakdown Card */}
         <div className="summary-card">
           <div className="summary-card-header">

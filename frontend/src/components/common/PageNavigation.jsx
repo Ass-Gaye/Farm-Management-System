@@ -10,6 +10,7 @@ import {
   InventoryIcon,
   FlockIcon,
   VaccineIcon,
+  DepopulationIcon,
 } from "../Icons";
 
 function PageNavigation() {
@@ -30,6 +31,12 @@ function PageNavigation() {
       label: "Flocks & Batches",
       icon: <FlockIcon size={15} />,
       badge: flocks?.length || 0,
+    },
+    {
+      to: "/depopulation",
+      label: "Depopulation",
+      icon: <DepopulationIcon size={15} />,
+      badge: null,
     },
     {
       to: "/daily-records",
