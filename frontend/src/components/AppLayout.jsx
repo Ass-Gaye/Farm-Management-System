@@ -52,16 +52,18 @@ function AppLayout() {
         <div className="navbar-actions">
           {currentUser && (
             <div className="user-profile">
-              <span className="user-avatar" aria-hidden="true">👤</span>
-              <div
-                className="user-info"
-                style={{ cursor: "pointer" }}
+              <button
+                type="button"
+                className="user-profile-trigger"
                 onClick={() => setShowProfileModal(true)}
                 title="Account settings & change password"
+                aria-label={`Open account settings for ${currentUser.name}`}
               >
-                <strong>{currentUser.name}</strong>
-                <span>{currentUser.email}</span>
-              </div>
+                <span className="user-avatar" aria-hidden="true">👤</span>
+                <span className="user-info">
+                  <strong>{currentUser.name}</strong>
+                </span>
+              </button>
               <button
                 type="button"
                 className="secondary-button"

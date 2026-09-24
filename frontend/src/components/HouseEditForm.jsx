@@ -5,6 +5,7 @@ import { updateHouse } from "../services/api";
 function HouseEditForm({ house, onSuccess, onCancel }) {
   const [formData, setFormData] = useState({
     name: house.name,
+    address: house.address || "",
     birdsPlaced: house.birdsPlaced,
     createdAt: new Date(house.createdAt)
       .toISOString()
@@ -33,6 +34,11 @@ function HouseEditForm({ house, onSuccess, onCancel }) {
         return;
     }
 
+    if (!formData.address.trim()) {
+        setError("Address / Location is required.");
+        return;
+    }
+
     if (!formData.birdsPlaced || Number(formData.birdsPlaced) <= 0) {
         setError("Number of birds must be greater than 0.");
         return;
@@ -43,6 +49,7 @@ function HouseEditForm({ house, onSuccess, onCancel }) {
 
         const result = await updateHouse(house.id, {
         name: formData.name.trim(),
+        address: formData.address.trim(),
         birdsPlaced: Number(formData.birdsPlaced),
         createdAt: formData.createdAt,
         });
@@ -83,6 +90,19 @@ function HouseEditForm({ house, onSuccess, onCancel }) {
             name="name"
             type="text"
             value={formData.name}
+            onChange={handleChange}
+          />
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="edit-house-address">Address / Location</label>
+
+          <input
+            id="edit-house-address"
+            name="address"
+            type="text"
+            placeholder="e.g. Brufut, West Coast Region"
+            value={formData.address}
             onChange={handleChange}
           />
         </div>

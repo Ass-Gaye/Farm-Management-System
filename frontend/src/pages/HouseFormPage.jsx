@@ -19,6 +19,7 @@ function HouseFormPage() {
     if (existingHouse) {
       return {
         name: existingHouse.name || "",
+        address: existingHouse.address || "",
         birdsPlaced: String(existingHouse.birdsPlaced || ""),
         createdAt: existingHouse.createdAt
           ? new Date(existingHouse.createdAt).toISOString().split("T")[0]
@@ -27,6 +28,7 @@ function HouseFormPage() {
     }
     return {
       name: "",
+      address: "",
       birdsPlaced: "",
       createdAt: new Date().toISOString().split("T")[0],
     };
@@ -48,6 +50,7 @@ function HouseFormPage() {
         if (!cancelled && result.data) {
           setFormData({
             name: result.data.name || "",
+            address: result.data.address || "",
             birdsPlaced: String(result.data.birdsPlaced || ""),
             createdAt: result.data.createdAt
               ? new Date(result.data.createdAt).toISOString().split("T")[0]
@@ -89,6 +92,11 @@ function HouseFormPage() {
       return;
     }
 
+    if (!formData.address.trim()) {
+      setError("Address / Location is required.");
+      return;
+    }
+
     const birdsNum = Number(formData.birdsPlaced);
     if (!formData.birdsPlaced || isNaN(birdsNum) || birdsNum <= 0 || !Number.isInteger(birdsNum)) {
       setError("Number of birds placed must be a whole number greater than 0.");
@@ -101,6 +109,7 @@ function HouseFormPage() {
       if (isEditing) {
         const result = await updateHouse(id, {
           name: formData.name.trim(),
+          address: formData.address.trim(),
           birdsPlaced: birdsNum,
         });
         showToast(`Poultry house "${result.data.name}" updated.`);
@@ -108,6 +117,7 @@ function HouseFormPage() {
       } else {
         const result = await createHouse({
           name: formData.name.trim(),
+          address: formData.address.trim(),
           birdsPlaced: birdsNum,
           createdAt: formData.createdAt,
         });
@@ -155,6 +165,19 @@ function HouseFormPage() {
                 value={formData.name}
                 onChange={handleChange}
                 autoFocus
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="house-address">Address / Location *</label>
+              <input
+                id="house-address"
+                name="address"
+                type="text"
+                placeholder="e.g. Brufut, West Coast Region"
+                value={formData.address}
+                onChange={handleChange}
                 required
               />
             </div>

@@ -10,12 +10,13 @@ const prisma = require("../lib/prisma");
  */
 const createHouse = async (req, res, next) => {
   try {
-    const { name, birdsPlaced, createdAt } = req.body;
+    const { name, address, birdsPlaced, createdAt } = req.body;
 
     const house = await prisma.poultryHouse.create({
       data: {
         userId: req.user.id,
         name,
+        address,
         birdsPlaced,
         createdAt,
       },
@@ -134,7 +135,7 @@ const getHouseById = async (req, res, next) => {
 const updateHouse = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, birdsPlaced, createdAt } = req.body;
+    const { name, address, birdsPlaced, createdAt } = req.body;
 
     const existingHouse = await prisma.poultryHouse.findFirst({
       where: {
@@ -171,6 +172,7 @@ const updateHouse = async (req, res, next) => {
       },
       data: {
         name,
+        address,
         birdsPlaced,
         createdAt,
       },

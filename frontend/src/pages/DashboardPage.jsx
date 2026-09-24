@@ -108,6 +108,9 @@ function DashboardPage() {
         <div>
           <span className="section-eyebrow">Poultry House</span>
           <h2>{selectedHouse.name}</h2>
+          {selectedHouse.address && (
+            <p style={{ color: "var(--text-muted)" }}>📍 {selectedHouse.address}</p>
+          )}
           <p>
             Overview of flock status, production metrics, health logs, and harvest planning.
           </p>

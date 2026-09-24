@@ -5,6 +5,7 @@ import { createHouse } from "../services/api";
 function HouseForm({ onSuccess, onCancel }) {
   const [formData, setFormData] = useState({
     name: "",
+    address: "",
     birdsPlaced: "",
     createdAt: new Date().toISOString().split("T")[0],
   });
@@ -31,6 +32,11 @@ function HouseForm({ onSuccess, onCancel }) {
             return;
         }
 
+        if (!formData.address.trim()) {
+            setError("Address / Location is required.");
+            return;
+        }
+
         if (!formData.birdsPlaced || Number(formData.birdsPlaced) <= 0) {
             setError("Number of birds must be greater than 0.");
             return;
@@ -41,6 +47,7 @@ function HouseForm({ onSuccess, onCancel }) {
 
             const result = await createHouse({
             name: formData.name.trim(),
+            address: formData.address.trim(),
             birdsPlaced: Number(formData.birdsPlaced),
             createdAt: formData.createdAt,
             });
@@ -82,6 +89,19 @@ function HouseForm({ onSuccess, onCancel }) {
             type="text"
             placeholder="e.g. Sunrise Poultry House"
             value={formData.name}
+            onChange={handleChange}
+          />
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="house-address">Address / Location</label>
+
+          <input
+            id="house-address"
+            name="address"
+            type="text"
+            placeholder="e.g. Brufut, West Coast Region"
+            value={formData.address}
             onChange={handleChange}
           />
         </div>

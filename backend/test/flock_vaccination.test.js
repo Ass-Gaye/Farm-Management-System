@@ -88,6 +88,7 @@ test("Flock, DailyRecord, and Vaccination integration workflow", async () => {
     headers: authHeaders,
     body: JSON.stringify({
       name: "House Alpha",
+      address: "Brufut, West Coast Region, The Gambia",
       birdsPlaced: 1000,
       createdAt: new Date().toISOString(),
     }),

@@ -69,6 +69,11 @@ const createHouseSchema = z.object({
     .string()
     .trim()
     .min(2, "House name must be at least 2 characters"),
+  address: z
+    .string()
+    .trim()
+    .min(2, "Address / Location is required")
+    .max(300, "Address must not exceed 300 characters"),
   birdsPlaced: z
     .number()
     .int("Number of birds must be a whole number")

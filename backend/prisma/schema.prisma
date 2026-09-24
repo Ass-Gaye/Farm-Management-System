@@ -80,6 +80,7 @@ model PoultryHouse {
   id             Int             @id @default(autoincrement())
   userId         Int
   name           String
+  address        String?
   birdsPlaced    Int
   createdAt      DateTime        @default(now())
   flocks         Flock[]

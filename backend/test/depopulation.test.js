@@ -88,6 +88,7 @@ test("Priority 1: Bird Depopulation / Harvest Management 15-Point Integration Wo
     headers: auth1,
     body: JSON.stringify({
       name: "Layer House 1",
+      address: "Brufut, West Coast Region, The Gambia",
       birdsPlaced: 500,
       createdAt: new Date().toISOString(),
     }),

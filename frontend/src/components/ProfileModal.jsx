@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { updateProfile, changePassword } from "../services/api";
 
 function ProfileModal({ isOpen, onClose, user, onProfileUpdated, showToast }) {
@@ -17,6 +17,46 @@ function ProfileModal({ isOpen, onClose, user, onProfileUpdated, showToast }) {
 
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Resync form state every time the modal opens (or the user changes),
+  // so stale edits from a previous session are never shown.
+  useEffect(() => {
+    if (isOpen) {
+      setProfileData({ name: user?.name || "", email: user?.email || "" });
+      setPasswordData({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setTab("profile");
+      setError("");
+      setSaving(false);
+    }
+  }, [isOpen, user]);
+
+  const isProfileDirty =
+    profileData.name.trim() !== (user?.name || "") ||
+    profileData.email.trim() !== (user?.email || "");
+  const isPasswordDirty =
+    passwordData.currentPassword !== "" ||
+    passwordData.newPassword !== "" ||
+    passwordData.confirmPassword !== "";
+  const isDirty = tab === "profile" ? isProfileDirty : isPasswordDirty;
+
+  const requestClose = () => {
+    if (saving) return;
+    if (isDirty && !window.confirm("Discard unsaved changes?")) return;
+    setError("");
+    onClose();
+  };
+
+  const userInitial = (user?.name || user?.email || "?").trim().charAt(0).toUpperCase();
+
+  // Close on Escape; warn first when there are unsaved changes.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") requestClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
 
   if (!isOpen) return null;
 
@@ -86,20 +126,35 @@ function ProfileModal({ isOpen, onClose, user, onProfileUpdated, showToast }) {
   };
 
   return (
-    <div className="dialog-overlay" onClick={onClose}>
+    <div className="dialog-overlay" onClick={requestClose}>
       <div
         className="form-card"
         style={{ maxWidth: 440, width: "90%", margin: "40px auto" }}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Account settings"
       >
         <div className="form-header">
           <div>
             <h2>Account Settings</h2>
             <p>Manage your user credentials and farm profile.</p>
           </div>
-          <button type="button" className="close-button" onClick={onClose}>
+          <button type="button" className="close-button" onClick={requestClose} aria-label="Close account settings">
             ×
           </button>
+        </div>
+
+        <div
+          style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}
+        >
+          <span className="user-avatar" style={{ width: 44, height: 44, fontSize: 20 }} aria-hidden="true">
+            {userInitial}
+          </span>
+          <div className="user-info">
+            <strong>{user?.name || "Farm user"}</strong>
+            <span>{user?.email || ""}</span>
+          </div>
         </div>
 
         <div className="auth-tabs" style={{ marginBottom: 16 }}>
@@ -154,7 +209,7 @@ function ProfileModal({ isOpen, onClose, user, onProfileUpdated, showToast }) {
               <button
                 type="button"
                 className="secondary-button"
-                onClick={onClose}
+                onClick={requestClose}
                 disabled={saving}
               >
                 Cancel
@@ -210,7 +265,7 @@ function ProfileModal({ isOpen, onClose, user, onProfileUpdated, showToast }) {
               <button
                 type="button"
                 className="secondary-button"
-                onClick={onClose}
+                onClick={requestClose}
                 disabled={saving}
               >
                 Cancel

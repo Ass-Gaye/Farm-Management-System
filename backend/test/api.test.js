@@ -138,6 +138,7 @@ test("supports full authentication, user isolation, and features lifecycle", asy
     headers: authHeaders1,
     body: JSON.stringify({
       name: testHouseName,
+      address: "Brufut, West Coast Region, The Gambia",
       birdsPlaced: 100,
       createdAt: "2026-09-10",
     }),
@@ -164,6 +165,7 @@ test("supports full authentication, user isolation, and features lifecycle", asy
     headers: authHeaders2,
     body: JSON.stringify({
       name: "Hacked House",
+      address: "Nowhere",
       birdsPlaced: 200,
       createdAt: "2026-09-10",
     }),

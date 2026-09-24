@@ -119,6 +119,42 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
+  flex-shrink: 0;
+}
+
+/* Clickable profile trigger (avatar + name + email as one accessible button) */
+.user-profile-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.user-profile-trigger:hover {
+  background: var(--bg-surface);
+}
+
+.user-profile-trigger:hover .user-info strong {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.user-profile-trigger:focus {
+  outline: none;
+}
+
+.user-profile-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--field-100);
+  background: var(--bg-surface);
 }
 
 .user-info {
