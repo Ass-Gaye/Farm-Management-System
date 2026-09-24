@@ -33,7 +33,7 @@ const request = async (endpoint, options = {}) => {
     },
   });
 
-  let result = {};
+  let result;
   try {
     const text = await response.text();
     result = text ? JSON.parse(text) : {};
