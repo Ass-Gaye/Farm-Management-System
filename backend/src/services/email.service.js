@@ -36,8 +36,10 @@ const sendViaResend = async ({ to, subject, text, html }) => {
   return { sent: true, provider: "resend" };
 };
 
+const DEFAULT_FRONTEND_URL = "https://farm-management-system-xi.vercel.app";
+
 const buildResetLink = (resetToken) => {
-  const base = (process.env.FRONTEND_URL || "").replace(/\/$/, "");
+  const base = (process.env.FRONTEND_URL || DEFAULT_FRONTEND_URL).replace(/\/$/, "");
   if (!base) return null;
   return `${base}/reset-password?token=${encodeURIComponent(resetToken)}`;
 };
