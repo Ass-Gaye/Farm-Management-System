@@ -33,14 +33,21 @@ const request = async (endpoint, options = {}) => {
     },
   });
 
-  const result = await response.json();
+  let result = {};
+  try {
+    const text = await response.text();
+    result = text ? JSON.parse(text) : {};
+  } catch {
+    result = {};
+  }
 
   if (!response.ok) {
-    if (response.status === 401) {
-      // If unauthorized, clear invalid token
+    // Only clear the stored token when the failing call actually sent one.
+    // Public calls (login/register) return 401 without invalidating state.
+    if (response.status === 401 && token) {
       removeAuthToken();
     }
-    throw new Error(result.message || "Something went wrong");
+    throw new Error(result.message || `Request failed with status ${response.status}`);
   }
 
   return result;

@@ -1,6 +1,11 @@
 const assert = require("node:assert/strict");
 const { after, before, test } = require("node:test");
 
+// Expose reset token in API response for this integration test.
+// Production must use email/SMS delivery (ALLOW_RESET_TOKEN_IN_RESPONSE=false).
+process.env.ALLOW_RESET_TOKEN_IN_RESPONSE = "true";
+process.env.NODE_ENV = process.env.NODE_ENV || "test";
+
 const prisma = require("../src/lib/prisma");
 const { app } = require("../src/server");
 

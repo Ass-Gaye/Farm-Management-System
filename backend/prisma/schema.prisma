@@ -8,12 +8,60 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// Enumerated domain values (application-enforced; see migration note below).
+// Prisma fields remain String for backward compatibility until a dedicated
+// enum-migration is applied. New code should use these values.
+enum FlockPurpose {
+  BROILER
+  LAYER
+  BREEDER
+  DUAL_PURPOSE
+  OTHER
+}
+
+enum FlockStatus {
+  ACTIVE
+  COMPLETED
+  SOLD
+  SLAUGHTERED
+  ARCHIVED
+}
+
+enum VaccinationStatus {
+  PENDING
+  COMPLETED
+  MISSED
+}
+
+enum DepopulationReason {
+  SOLD
+  SLAUGHTERED
+  CULLED
+  TRANSFERRED
+  OTHER
+}
+
+enum PaymentStatus {
+  PAID
+  PARTIALLY_PAID
+  UNPAID
+}
+
+enum InventoryMovementType {
+  PURCHASE
+  CONSUMPTION
+  ADJUSTMENT
+  WASTAGE
+  RETURN
+}
+
 model User {
   id        Int            @id @default(autoincrement())
   email     String         @unique
   password  String
   name      String
   createdAt DateTime       @default(now())
+  updatedAt DateTime?      @updatedAt
   houses    PoultryHouse[]
   flocks    Flock[]
   vaccinations Vaccination[]
@@ -89,6 +137,7 @@ model Breed {
   expenses       Expense[]
   income         Income[]
 
+  @@index([houseId])
   @@map("breeds")
 }
 
@@ -109,6 +158,7 @@ model BirdCondition {
   flock            Flock?       @relation(fields: [flockId], references: [id], onDelete: SetNull)
   breed            Breed?       @relation(fields: [breedId], references: [id], onDelete: SetNull)
 
+  @@index([houseId])
   @@index([flockId])
   @@map("bird_conditions")
 }
@@ -129,6 +179,7 @@ model SlaughterPlan {
   flock                 Flock?       @relation(fields: [flockId], references: [id], onDelete: SetNull)
   breed                 Breed?       @relation(fields: [breedId], references: [id], onDelete: SetNull)
 
+  @@index([houseId])
   @@index([flockId])
   @@map("slaughter_plans")
 }

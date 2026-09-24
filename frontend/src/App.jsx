@@ -22,6 +22,7 @@ import FlocksPage from "./pages/FlocksPage";
 import FlockFormPage from "./pages/FlockFormPage";
 import VaccinationsPage from "./pages/VaccinationsPage";
 import DepopulationPage from "./pages/DepopulationPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 import "./App.css";
 
@@ -42,13 +43,21 @@ function AppContent() {
     );
   }
 
-  // Not logged in -> Render Auth Modal
+  // Not logged in -> public reset-password page stays reachable (email link),
+  // everything else shows the auth modal.
   if (!currentUser) {
-    return <AuthModal onSuccess={handleAuthSuccess} />;
+    return (
+      <Routes>
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="*" element={<AuthModal onSuccess={handleAuthSuccess} />} />
+      </Routes>
+    );
   }
 
   return (
     <Routes>
+      {/* Public: email reset link works whether or not the user is signed in */}
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route element={<AppLayout />}>
         {/* Default Landing */}
         <Route index element={<Navigate to="/dashboard" replace />} />

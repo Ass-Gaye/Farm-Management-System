@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { calculateConsumptionInFeedUnit } = require("../services/feed-unit.service");
 
 const runSerializable = async (operation) => {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -14,37 +15,6 @@ const runSerializable = async (operation) => {
       }
     }
   }
-};
-
-/**
- * Helper to calculate consumed quantity in the feedType's storage unit.
- */
-const calculateConsumptionInFeedUnit = (feedUsedKg, feedType) => {
-  const fUnit = (feedType.unit || "").trim().toLowerCase();
-  const bagWeight = Number(feedType.bagWeightKg);
-
-  const isKg = fUnit === "kg" || fUnit === "kgs" || fUnit === "kilogram" || fUnit === "kilograms";
-  const isBag = fUnit === "bag" || fUnit === "bags";
-
-  if (isKg) {
-    return feedUsedKg;
-  }
-  if (isBag) {
-    if (!bagWeight || bagWeight <= 0) {
-      const error = new Error(
-        `Feed type '${feedType.name}' does not have a valid bag weight configured for conversion.`
-      );
-      error.code = "INVALID_BAG_WEIGHT";
-      throw error;
-    }
-    return feedUsedKg / bagWeight;
-  }
-
-  const error = new Error(
-    `Unsupported feed unit conversion from daily usage in kg to feed inventory unit '${feedType.unit}'. Supported units for daily feeding are kg and bags.`
-  );
-  error.code = "UNSUPPORTED_UNIT";
-  throw error;
 };
 
 /**
@@ -758,6 +728,7 @@ const deleteDailyRecord = async (req, res, next) => {
 };
 
 module.exports = {
+  calculateConsumptionInFeedUnit,
   createDailyRecord,
   getDailyRecords,
   getDailyRecordById,

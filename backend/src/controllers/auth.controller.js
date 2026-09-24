@@ -1,9 +1,10 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const prisma = require("../lib/prisma");
+const { sendPasswordResetEmail } = require("../services/email.service");
 const { JWT_SECRET } = require("../middleware/auth.middleware");
 
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1d";
 
 /**
  * Registers a new user account.
@@ -215,8 +216,12 @@ const changePassword = async (req, res, next) => {
 
 /**
  * Initiates a password reset request.
- * Generates a signed token valid for 1 hour.
+ * If the account exists, emails a single-use token valid for 1 hour.
+ * Always returns the same generic message so callers cannot enumerate users.
  */
+const GENERIC_RESET_MESSAGE =
+  "If an account with that email exists, we have sent password reset instructions to it.";
+
 const forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
@@ -226,12 +231,9 @@ const forgotPassword = async (req, res, next) => {
       where: { email: normalizedEmail },
     });
 
-    // If user not found, return generic success message to prevent user enumeration
+    // Unknown address: same generic response, no email, no token.
     if (!user) {
-      return res.json({
-        success: true,
-        message: "If an account with that email exists, password reset instructions have been generated.",
-      });
+      return res.json({ success: true, message: GENERIC_RESET_MESSAGE });
     }
 
     // Generate a single-use, 1-hour reset token signed with JWT_SECRET + user.password
@@ -243,13 +245,29 @@ const forgotPassword = async (req, res, next) => {
       { expiresIn: "1h" }
     );
 
+    // Deliver out-of-band. Failures are logged only; response stays generic.
+    await sendPasswordResetEmail({
+      to: user.email,
+      name: user.name,
+      resetToken,
+    });
+
+    console.log(
+      `Password reset requested for user id=${user.id}. Email dispatched (or logged in dev), token valid 1h.`
+    );
+
+    // Test/dev backdoor only: expose the token so integration tests can
+    // complete the reset flow without a mailbox.
+    const exposeToken =
+      process.env.ALLOW_RESET_TOKEN_IN_RESPONSE === "true" ||
+      process.env.NODE_ENV === "test";
+
     res.json({
       success: true,
-      message: "Password reset token generated successfully. Valid for 1 hour.",
-      data: {
-        resetToken,
-        email: user.email,
-      },
+      message: GENERIC_RESET_MESSAGE,
+      ...(exposeToken
+        ? { data: { resetToken, email: user.email } }
+        : {}),
     });
   } catch (error) {
     next(error);

@@ -16,7 +16,7 @@ const validate = (schema) => {
       return res.status(400).json({
         success: false,
         message: "Validation failed",
-        errors: result.error.flatten().fieldErrors, // takes zod errors and oragnazes it by field.
+        errors: result.error.flatten().fieldErrors, // takes zod errors and organizes them by field.
       });
     }
 

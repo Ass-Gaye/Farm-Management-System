@@ -7,6 +7,7 @@
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 require("dotenv").config();
 
 const errorMiddleware = require("./middleware/error.middleware");
@@ -61,6 +62,17 @@ const createApp = () => {
   );
   app.use(express.json({ limit: "1mb" }));
 
+  // Throttle general API usage (auth routes have their own stricter limiter).
+  // Must be registered before route mounts to take effect.
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: process.env.NODE_ENV === "test" ? 10000 : 600,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, message: "Too many requests. Please slow down." },
+  });
+  app.use("/api", apiLimiter);
+
   app.get("/api/health", (req, res) => {
     res.json({
       success: true,
@@ -88,10 +100,15 @@ const createApp = () => {
   app.use("/api/depopulation-events", depopulationRoutes);
   app.use("/api/flocks/:flockId/depopulation-events", depopulationRoutes);
 
-  // Financial route aliases
+  // Financial route aliases (canonical: /api/finances/*; kept for backward compatibility)
   app.get("/api/financial-summary", authenticate, getFinancialSummary);
   app.get("/api/financial-transactions", authenticate, getFinancialTransactions);
   app.get("/api/financial-reports", authenticate, getFinancialReports);
+
+  // Unknown API routes -> clean JSON 404 (must come before error handler)
+  app.use("/api", (req, res) => {
+    res.status(404).json({ success: false, message: "API endpoint not found" });
+  });
 
   app.use(errorMiddleware);
 

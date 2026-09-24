@@ -107,13 +107,15 @@ function AuthModal({ onSuccess }) {
       try {
         setLoading(true);
         const result = await forgotPassword({ email: formData.email.trim() });
-        setSuccessMessage(result.message || "Password reset token generated.");
+        setSuccessMessage(
+          result.message || "If an account with that email exists, we have sent reset instructions to it."
+        );
         if (result.data?.resetToken) {
+          // Test/dev backdoor only: API exposes the token when explicitly enabled.
           setFormData((prev) => ({
             ...prev,
             resetToken: result.data.resetToken,
           }));
-          // Transition to reset view automatically after a brief moment or directly
           setMode("reset");
         }
       } catch (err) {

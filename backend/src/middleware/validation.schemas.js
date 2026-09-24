@@ -7,18 +7,26 @@
 const { z } = require("zod");
 
 // Auth Schemas
+const passwordRule = (fieldLabel = "Password") =>
+  z
+    .string()
+    .min(6, `${fieldLabel} must be at least 6 characters long`)
+    .max(72, `${fieldLabel} must not exceed 72 characters (bcrypt limit)`)
+    .refine((val) => /[A-Za-z]/.test(val) && /[0-9]/.test(val), {
+      message: `${fieldLabel} must contain at least one letter and one number`,
+    });
+
 const registerSchema = z.object({
   email: z
     .string()
     .trim()
     .email("Please provide a valid email address"),
-  password: z
-    .string()
-    .min(6, "Password must be at least 6 characters long"),
+  password: passwordRule("Password"),
   name: z
     .string()
     .trim()
-    .min(2, "Name must be at least 2 characters long"),
+    .min(2, "Name must be at least 2 characters long")
+    .max(100, "Name must not exceed 100 characters"),
 });
 
 const loginSchema = z.object({
@@ -37,8 +45,8 @@ const updateProfileSchema = z.object({
 });
 
 const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1, "Current password is required"),
-  newPassword: z.string().min(6, "New password must be at least 6 characters"),
+  currentPassword: z.string().min(1, "Current password is required").max(72),
+  newPassword: passwordRule("New password"),
 });
 
 const forgotPasswordSchema = z.object({
@@ -52,9 +60,7 @@ const resetPasswordSchema = z.object({
   token: z
     .string()
     .min(10, "Password reset token is required"),
-  newPassword: z
-    .string()
-    .min(6, "New password must be at least 6 characters"),
+  newPassword: passwordRule("New password"),
 });
 
 // House Schemas
@@ -1209,7 +1215,7 @@ const createDepopulationEventSchema = z.object({
     .int("Quantity must be a whole number")
     .positive("Quantity must be greater than 0"),
   reason: z.enum(DEPOPULATION_REASONS, {
-    errorMap: () => ({ message: `Reason must be one of: ${DEPOPULATION_REASONS.join(", ")}` }),
+    error: `Reason must be one of: ${DEPOPULATION_REASONS.join(", ")}`,
   }),
   date: z
     .union([
@@ -1228,7 +1234,7 @@ const updateDepopulationEventSchema = z.object({
     .optional(),
   reason: z
     .enum(DEPOPULATION_REASONS, {
-      errorMap: () => ({ message: `Reason must be one of: ${DEPOPULATION_REASONS.join(", ")}` }),
+      error: `Reason must be one of: ${DEPOPULATION_REASONS.join(", ")}`,
     })
     .optional(),
   date: z
@@ -1242,6 +1248,7 @@ const updateDepopulationEventSchema = z.object({
 });
 
 module.exports = {
+  passwordRule,
   registerSchema,
   loginSchema,
   updateProfileSchema,

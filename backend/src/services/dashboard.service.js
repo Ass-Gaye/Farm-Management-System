@@ -1,5 +1,5 @@
 const prisma = require("../lib/prisma");
-const { computeSlaughterStatus } = require("../controllers/slaughterPlan.controller");
+const { computeSlaughterStatus } = require("./slaughter.service");
 
 /**
  * Loads a house belonging to the user and aggregates production, breed, health,
