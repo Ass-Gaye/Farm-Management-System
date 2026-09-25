@@ -2,6 +2,7 @@ const prisma = require("../lib/prisma");
 // Domain logic lives in services; re-exported here for backward compatibility.
 const { validateOwnership, computePaymentState } = require("../services/finance.service");
 const { convertToFeedUnit } = require("../services/feed-unit.service");
+const { runSerializable } = require("../lib/transaction");
 
 
 // ==========================================
@@ -46,7 +47,7 @@ const createExpense = async (req, res, next) => {
 
     const payState = computePaymentState(finalAmount, amountPaid, paymentStatus);
 
-    const expense = await prisma.$transaction(
+    const expense = await runSerializable(
       async (tx) => {
         let feedType = null;
         if (feedTypeId) {
@@ -93,7 +94,10 @@ const createExpense = async (req, res, next) => {
           },
         });
 
-        // If feed purchase: increase inventory and log movement
+        // If feed purchase: increase shared farm stock and log movement.
+        // The stock effect is returned alongside the expense so finance UIs
+        // can show the inventory link without extra queries.
+        let inventoryEffect = null;
         if (feedType && quantity && Number(quantity) > 0) {
           const purchaseQty = convertToFeedUnit(Number(quantity), unit, feedType);
           const currentStock = Number(feedType.currentStock);
@@ -108,7 +112,7 @@ const createExpense = async (req, res, next) => {
             },
           });
 
-          await tx.inventoryMovement.create({
+          const movement = await tx.inventoryMovement.create({
             data: {
               userId: req.user.id,
               feedTypeId: feedType.id,
@@ -124,13 +128,19 @@ const createExpense = async (req, res, next) => {
               reason: exp.supplier ? `Feed purchase from ${exp.supplier.name}` : "Feed purchase",
             },
           });
+
+          inventoryEffect = {
+            feedTypeId: feedType.id,
+            feedName: feedType.name,
+            unit: feedType.unit,
+            purchaseQty,
+            stockBefore: currentStock,
+            stockAfter: newStock,
+            movementId: movement.id,
+          };
         }
 
-        return exp;
-      },
-      {
-        maxWait: 15000,
-        timeout: 30000,
+        return { expense: exp, inventory: inventoryEffect };
       }
     );
 
@@ -138,13 +148,14 @@ const createExpense = async (req, res, next) => {
       success: true,
       message: "Expense recorded successfully",
       data: {
-        ...expense,
-        amount: Number(expense.amount),
-        amountPaid: Number(expense.amountPaid || 0),
-        amountDue: Number(expense.amountDue || 0),
-        quantity: expense.quantity ? Number(expense.quantity) : null,
-        unitPrice: expense.unitPrice ? Number(expense.unitPrice) : null,
+        ...expense.expense,
+        amount: Number(expense.expense.amount),
+        amountPaid: Number(expense.expense.amountPaid || 0),
+        amountDue: Number(expense.expense.amountDue || 0),
+        quantity: expense.expense.quantity ? Number(expense.expense.quantity) : null,
+        unitPrice: expense.expense.unitPrice ? Number(expense.expense.unitPrice) : null,
       },
+      inventory: expense.inventory,
     });
   } catch (error) {
     if (error.code === "UNSUPPORTED_UNIT" || error.code === "INVALID_BAG_WEIGHT") {
@@ -274,6 +285,14 @@ const getExpenseById = async (req, res, next) => {
         feedType: {
           select: { id: true, name: true, unit: true, bagWeightKg: true },
         },
+        inventoryMovements: {
+          select: {
+            id: true, type: true, quantity: true, unit: true,
+            unitCost: true, totalCost: true, balanceAfter: true,
+            date: true, reason: true,
+          },
+          orderBy: { date: "desc" },
+        },
       },
     });
 
@@ -293,6 +312,13 @@ const getExpenseById = async (req, res, next) => {
         amountDue: Number(expense.amountDue || 0),
         quantity: expense.quantity ? Number(expense.quantity) : null,
         unitPrice: expense.unitPrice ? Number(expense.unitPrice) : null,
+        inventoryMovements: (expense.inventoryMovements || []).map((m) => ({
+          ...m,
+          quantity: Number(m.quantity),
+          unitCost: m.unitCost ? Number(m.unitCost) : null,
+          totalCost: m.totalCost ? Number(m.totalCost) : null,
+          balanceAfter: Number(m.balanceAfter),
+        })),
       },
     });
   } catch (error) {
@@ -363,17 +389,27 @@ const updateExpense = async (req, res, next) => {
     const effectivePaid = amountPaid !== undefined ? Math.min(Number(amountPaid), effectiveAmount) : wasFullyPaid ? effectiveAmount : Math.min(Number(existing.amountPaid || 0), effectiveAmount);
     const payState = computePaymentState(effectiveAmount, effectivePaid, paymentStatus);
 
-    const updated = await prisma.$transaction(
+    const updated = await runSerializable(
       async (tx) => {
-        // 1. Revert previous purchase movement if existed
+        // 1. Revert previous purchase movement if existed.
+        // Guard: never let a reversal drive stock negative (consumed stock
+        // cannot be un-consumed by deleting the purchase).
         const prevPurchase = existing.inventoryMovements.find((m) => m.type === "PURCHASE");
       if (prevPurchase) {
         const prevFeed = await tx.feedType.findUnique({ where: { id: prevPurchase.feedTypeId } });
         if (prevFeed) {
+          const stockAfterRevert = Number(prevFeed.currentStock) - Number(prevPurchase.quantity);
+          if (stockAfterRevert < 0) {
+            const error = new Error(
+              "Cannot update this feed purchase because the purchased stock has already been consumed. Reversing it would make inventory negative."
+            );
+            error.code = "NEGATIVE_REVERSAL";
+            throw error;
+          }
           await tx.feedType.update({
             where: { id: prevFeed.id },
             data: {
-              currentStock: Number(prevFeed.currentStock) - Number(prevPurchase.quantity),
+              currentStock: stockAfterRevert,
             },
           });
         }
@@ -433,6 +469,7 @@ const updateExpense = async (req, res, next) => {
       });
 
       // 3. Apply new purchase movement if feedType & quantity > 0
+      let inventoryEffect = null;
       if (feedType && finalQty && Number(finalQty) > 0) {
         const freshFeed = await tx.feedType.findUnique({ where: { id: feedType.id } });
         const purchaseQty = convertToFeedUnit(Number(finalQty), finalUnit, freshFeed);
@@ -449,7 +486,7 @@ const updateExpense = async (req, res, next) => {
           },
         });
 
-        await tx.inventoryMovement.create({
+        const movement = await tx.inventoryMovement.create({
           data: {
             userId: req.user.id,
             feedTypeId: freshFeed.id,
@@ -465,13 +502,19 @@ const updateExpense = async (req, res, next) => {
             reason: exp.supplier ? `Feed purchase from ${exp.supplier.name}` : "Feed purchase",
           },
         });
+
+        inventoryEffect = {
+          feedTypeId: freshFeed.id,
+          feedName: freshFeed.name,
+          unit: freshFeed.unit,
+          purchaseQty,
+          stockBefore: currentStock,
+          stockAfter: newStock,
+          movementId: movement.id,
+        };
       }
 
-        return exp;
-      },
-      {
-        maxWait: 15000,
-        timeout: 30000,
+        return { expense: exp, inventory: inventoryEffect };
       }
     );
 
@@ -479,16 +522,23 @@ const updateExpense = async (req, res, next) => {
       success: true,
       message: "Expense updated successfully",
       data: {
-        ...updated,
-        amount: Number(updated.amount),
-        amountPaid: Number(updated.amountPaid || 0),
-        amountDue: Number(updated.amountDue || 0),
-        quantity: updated.quantity ? Number(updated.quantity) : null,
-        unitPrice: updated.unitPrice ? Number(updated.unitPrice) : null,
+        ...updated.expense,
+        amount: Number(updated.expense.amount),
+        amountPaid: Number(updated.expense.amountPaid || 0),
+        amountDue: Number(updated.expense.amountDue || 0),
+        quantity: updated.expense.quantity ? Number(updated.expense.quantity) : null,
+        unitPrice: updated.expense.unitPrice ? Number(updated.expense.unitPrice) : null,
       },
+      inventory: updated.inventory,
     });
   } catch (error) {
     if (error.code === "UNSUPPORTED_UNIT" || error.code === "INVALID_BAG_WEIGHT") {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    if (error.code === "NEGATIVE_REVERSAL") {
       return res.status(400).json({
         success: false,
         message: error.message,
@@ -505,7 +555,7 @@ const deleteExpense = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    await prisma.$transaction(
+    const result = await runSerializable(
       async (tx) => {
         const existing = await tx.expense.findFirst({
           where: {
@@ -523,22 +573,41 @@ const deleteExpense = async (req, res, next) => {
         throw error;
       }
 
-      // Revert any purchase movements
+      // Revert any purchase movements. Guard: reversal must not
+      // drive inventory negative.
       const purchaseMovements = existing.inventoryMovements.filter(
         (m) => m.type === "PURCHASE"
       );
 
+      let inventoryEffect = null;
       for (const mov of purchaseMovements) {
         const feed = await tx.feedType.findUnique({
           where: { id: mov.feedTypeId },
         });
         if (feed) {
+          const stockBefore = Number(feed.currentStock);
+          const stockAfterRevert = stockBefore - Number(mov.quantity);
+          if (stockAfterRevert < 0) {
+            const error = new Error(
+              "Cannot delete this feed purchase because the purchased stock has already been consumed. Reversing it would make inventory negative."
+            );
+            error.code = "NEGATIVE_REVERSAL";
+            throw error;
+          }
           await tx.feedType.update({
             where: { id: feed.id },
             data: {
-              currentStock: Number(feed.currentStock) - Number(mov.quantity),
+              currentStock: stockAfterRevert,
             },
           });
+          inventoryEffect = {
+            feedTypeId: feed.id,
+            feedName: feed.name,
+            unit: feed.unit,
+            reversedQty: Number(mov.quantity),
+            stockBefore,
+            stockAfter: stockAfterRevert,
+          };
         }
         await tx.inventoryMovement.delete({
           where: { id: mov.id },
@@ -550,20 +619,25 @@ const deleteExpense = async (req, res, next) => {
             id: Number(id),
           },
         });
-      },
-      {
-        maxWait: 15000,
-        timeout: 30000,
+
+        return { inventory: inventoryEffect };
       }
     );
 
     res.json({
       success: true,
       message: "Expense record deleted successfully",
+      inventory: result.inventory,
     });
   } catch (error) {
     if (error.code === "NOT_FOUND") {
       return res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    if (error.code === "NEGATIVE_REVERSAL") {
+      return res.status(400).json({
         success: false,
         message: error.message,
       });

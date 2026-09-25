@@ -1,4 +1,10 @@
 const prisma = require("../lib/prisma");
+const {
+  getAdjustmentMaps,
+  sumCorrectedMortality,
+  sumCorrectedEggs,
+  correctedEggsOf,
+} = require("../services/correction.service");
 
 /**
  * Helper to calculate dynamic flock age from placement date.
@@ -142,6 +148,7 @@ const getFlocks = async (req, res, next) => {
         breed: { select: { id: true, name: true } },
         dailyRecords: {
           select: {
+            id: true,
             mortality: true,
             feedUsedKg: true,
             eggsCollected: true,
@@ -156,11 +163,16 @@ const getFlocks = async (req, res, next) => {
       orderBy: { placementDate: "desc" },
     });
 
+    // One batched query for append-only corrections across all flocks;
+    // corrected mortality/eggs flow into every derived figure below.
+    const allRecordIds = flocks.flatMap((f) => f.dailyRecords.map((r) => r.id));
+    const adjMap = await getAdjustmentMaps(prisma, allRecordIds, userId);
+
     const enriched = flocks.map((flock) => {
-      const totalMortality = flock.dailyRecords.reduce((sum, r) => sum + r.mortality, 0);
+      const totalMortality = sumCorrectedMortality(flock.dailyRecords, adjMap);
       const totalDepopulated = (flock.depopulationEvents || []).reduce((sum, e) => sum + e.quantity, 0);
       const totalFeedUsedKg = flock.dailyRecords.reduce((sum, r) => sum + r.feedUsedKg, 0);
-      const totalEggs = flock.dailyRecords.reduce((sum, r) => sum + r.eggsCollected, 0);
+      const totalEggs = sumCorrectedEggs(flock.dailyRecords, adjMap);
       const mortalityRate =
         flock.birdsPlaced > 0
           ? Number(((totalMortality / flock.birdsPlaced) * 100).toFixed(2))
@@ -188,7 +200,7 @@ const getFlocks = async (req, res, next) => {
       if (flock.purpose === "LAYER" && liveBirds > 0 && flock.dailyRecords.length > 0) {
         const sortedRecords = [...flock.dailyRecords].sort((a, b) => new Date(b.date) - new Date(a.date));
         const latestRecord = sortedRecords[0];
-        latestLayingRate = Number(((latestRecord.eggsCollected / liveBirds) * 100).toFixed(1));
+        latestLayingRate = Number(((correctedEggsOf(latestRecord, adjMap) / liveBirds) * 100).toFixed(1));
       }
 
       return {
@@ -279,11 +291,17 @@ const getFlockById = async (req, res, next) => {
       });
     }
 
-    // Performance Calculations
-    const totalMortality = flock.dailyRecords.reduce((sum, r) => sum + r.mortality, 0);
+    // Performance Calculations (corrected values include append-only
+    // adjustments so historical corrections flow into reporting).
+    const adjMap = await getAdjustmentMaps(
+      prisma,
+      flock.dailyRecords.map((r) => r.id),
+      userId
+    );
+    const totalMortality = sumCorrectedMortality(flock.dailyRecords, adjMap);
     const totalDepopulated = (flock.depopulationEvents || []).reduce((sum, e) => sum + e.quantity, 0);
     const totalFeedKg = flock.dailyRecords.reduce((sum, r) => sum + r.feedUsedKg, 0);
-    const totalEggs = flock.dailyRecords.reduce((sum, r) => sum + r.eggsCollected, 0);
+    const totalEggs = sumCorrectedEggs(flock.dailyRecords, adjMap);
     const liveBirds = Math.max(0, flock.birdsPlaced - totalMortality - totalDepopulated);
 
     const mortalityRate =
@@ -320,7 +338,8 @@ const getFlockById = async (req, res, next) => {
         averageLayingRate = Number(((totalEggs / totalPossibleEggs) * 100).toFixed(1));
       }
       if (flock.dailyRecords.length > 0) {
-        latestLayingRate = Number(((flock.dailyRecords[0].eggsCollected / liveBirds) * 100).toFixed(1));
+        const latestCorrectedEggs = correctedEggsOf(flock.dailyRecords[0], adjMap);
+        latestLayingRate = Number(((latestCorrectedEggs / liveBirds) * 100).toFixed(1));
       }
     }
 
@@ -420,7 +439,7 @@ const updateFlock = async (req, res, next) => {
     const existingFlock = await prisma.flock.findFirst({
       where: { id: Number(id), userId },
       include: {
-        dailyRecords: true,
+        dailyRecords: { select: { id: true, mortality: true } },
         depopulationEvents: { select: { quantity: true } },
       },
     });
@@ -432,7 +451,12 @@ const updateFlock = async (req, res, next) => {
       });
     }
 
-    const totalMortality = existingFlock.dailyRecords.reduce((sum, r) => sum + r.mortality, 0);
+    const flockAdj = await getAdjustmentMaps(
+      prisma,
+      existingFlock.dailyRecords.map((r) => r.id),
+      userId
+    );
+    const totalMortality = sumCorrectedMortality(existingFlock.dailyRecords, flockAdj);
     const totalDepopulated = (existingFlock.depopulationEvents || []).reduce((sum, e) => sum + e.quantity, 0);
 
     const newBirdsPlaced = birdsPlaced !== undefined ? Number(birdsPlaced) : existingFlock.birdsPlaced;
@@ -499,12 +523,43 @@ const deleteFlock = async (req, res, next) => {
 
     const existing = await prisma.flock.findFirst({
       where: { id: Number(id), userId },
+      include: {
+        _count: {
+          select: {
+            dailyRecords: true,
+            depopulationEvents: true,
+            vaccinations: true,
+            expenses: true,
+            income: true,
+            birdConditions: true,
+            slaughterPlans: true,
+          },
+        },
+      },
     });
 
     if (!existing) {
       return res.status(404).json({
         success: false,
         message: "Flock not found",
+      });
+    }
+
+    const counts = existing._count || {};
+    const hasHistory =
+      (counts.dailyRecords || 0) > 0 ||
+      (counts.depopulationEvents || 0) > 0 ||
+      (counts.vaccinations || 0) > 0 ||
+      (counts.expenses || 0) > 0 ||
+      (counts.income || 0) > 0 ||
+      (counts.birdConditions || 0) > 0 ||
+      (counts.slaughterPlans || 0) > 0;
+
+    if (hasHistory) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Cannot delete this flock because it has historical records. Archive/deactivate it instead.",
       });
     }
 

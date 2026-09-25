@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
+import { FarmContext } from "../context/farmContextDef";
 import {
   createExpense,
   updateExpense,
@@ -41,6 +42,10 @@ function FinanceTransactionModal({
   const suppliers = propSuppliers.length > 0 ? propSuppliers : fetchedSuppliers;
   const handleClose = onCancel || onClose;
   const handleSuccess = onSuccess || onSaved;
+  // Cross-page freshness: bump the shared inventory version after any
+  // feed-affecting save so InventoryPage refetches (no-op if no provider).
+  const farmContext = useContext(FarmContext);
+  const notifyFeedInventoryChanged = farmContext?.notifyFeedInventoryChanged || null;
 
   const [formData, setFormData] = useState({
     category: "",
@@ -61,6 +66,7 @@ function FinanceTransactionModal({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [successInventory, setSuccessInventory] = useState(null);
 
   // Load feed types & suppliers on open
   useEffect(() => {
@@ -133,9 +139,50 @@ function FinanceTransactionModal({
       });
     }
     setError("");
+    setSuccessInventory(null);
   }, [initialData, initialType, defaultHouseId, defaultCategory, isOpen]);
 
   if (!isOpen) return null;
+
+  if (successInventory) {
+    return (
+      <div className="modal-backdrop" role="dialog" aria-modal="true">
+        <div className="modal-content" style={{ maxWidth: 480 }}>
+          <div className="modal-header">
+            <div>
+              <h3>✓ Purchase Recorded</h3>
+              <p className="modal-subtitle">Finance and inventory updated together.</p>
+            </div>
+            <button type="button" className="modal-close" onClick={handleClose} aria-label="Close">
+              ×
+            </button>
+          </div>
+          <div style={{ padding: "0 24px 24px" }}>
+            <div style={{ padding: "12px 14px", borderRadius: 8, fontSize: 13, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Feed Stock</div>
+              <div style={{ fontSize: 14, marginBottom: 4 }}>
+                <strong>{successInventory.feedName}</strong>
+              </div>
+              <div>
+                +{successInventory.purchaseQty} {successInventory.unit} added
+              </div>
+              <div>
+                {successInventory.stockBefore} → {successInventory.stockAfter} {successInventory.unit}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "#166534" }}>
+                ✓ Shared stock increased automatically — no manual adjustment needed
+              </div>
+            </div>
+            <div className="form-actions" style={{ marginTop: 16 }}>
+              <button type="button" className="primary-button" onClick={handleClose}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const currentCategories = type === "Income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
   const isEggSale = type === "Income" && formData.category === "Egg sales";
@@ -312,7 +359,14 @@ function FinanceTransactionModal({
       if (handleSuccess) {
         handleSuccess(result.data, type, isEditing);
       }
-      if (handleClose) {
+      if (notifyFeedInventoryChanged) {
+        notifyFeedInventoryChanged();
+      }
+      if (result?.inventory) {
+        // Feed purchase: show the automatic stock effect instead of
+        // closing immediately, mirroring the daily-record flow.
+        setSuccessInventory(result.inventory);
+      } else if (handleClose) {
         handleClose();
       }
     } catch (err) {

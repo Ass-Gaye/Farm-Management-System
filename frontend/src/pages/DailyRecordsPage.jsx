@@ -3,17 +3,27 @@ import { useNavigate } from "react-router-dom";
 import { useFarm } from "../context/useFarm";
 import PageHeader from "../components/common/PageHeader";
 import EmptyState from "../components/common/EmptyState";
+import CorrectionModal from "../components/CorrectionModal";
+import { isOutsideWindow } from "../utils/correctionWindow";
 import { PlusIcon } from "../components/Icons";
 
 import { exportToCsv } from "../utils/exportCsv";
 
 function DailyRecordsPage() {
   const navigate = useNavigate();
-  const { records, flocks, selectedHouse, setConfirmDialog } = useFarm();
+  const { records, flocks, selectedHouse, setConfirmDialog, reloadHouseData, notifyFeedInventoryChanged, showToast } = useFarm();
 
   const [dateFilter, setDateFilter] = useState("");
   const [flockFilter, setFlockFilter] = useState("ALL");
   const [sortOrder, setSortOrder] = useState("newest"); // "newest" | "oldest"
+  const [correctingRecord, setCorrectingRecord] = useState(null);
+
+  const handleCorrectionSaved = async () => {
+    setCorrectingRecord(null);
+    await reloadHouseData();
+    if (notifyFeedInventoryChanged) notifyFeedInventoryChanged();
+    showToast("Correction recorded. Original entry unchanged.");
+  };
 
   const filteredAndSortedRecords = [...records]
     .filter((record) => {
@@ -34,7 +44,7 @@ function DailyRecordsPage() {
     });
 
   const totalFilteredMortality = filteredAndSortedRecords.reduce(
-    (sum, r) => sum + (r.mortality || 0),
+    (sum, r) => sum + (r.correctedMortality ?? r.mortality ?? 0),
     0
   );
   const totalFilteredFeed = filteredAndSortedRecords.reduce(
@@ -42,7 +52,7 @@ function DailyRecordsPage() {
     0
   );
   const totalFilteredEggs = filteredAndSortedRecords.reduce(
-    (sum, r) => sum + (r.eggsCollected || 0),
+    (sum, r) => sum + (r.correctedEggs ?? r.eggsCollected ?? 0),
     0
   );
 
@@ -207,9 +217,11 @@ function DailyRecordsPage() {
                 <thead>
                   <tr>
                     <th>Date</th>
+                    <th>Poultry House</th>
                     <th>Flock / Batch</th>
                     <th>Mortality</th>
-                    <th>Feed & Weight</th>
+                    <th>Feed Type</th>
+                    <th>Feed Used</th>
                     <th>Eggs Collected</th>
                     <th style={{ textAlign: "right" }}>Actions</th>
                   </tr>
@@ -225,6 +237,7 @@ function DailyRecordsPage() {
                           day: "numeric",
                         })}
                       </td>
+                      <td>{record.house?.name || selectedHouse?.name || "—"}</td>
                       <td>
                         {record.flock ? (
                           <span className="breed-chip" style={{ fontSize: 12 }}>
@@ -239,20 +252,24 @@ function DailyRecordsPage() {
                           style={{
                             fontWeight: 600,
                             color:
-                              record.mortality > 0
+                              (record.correctedMortality ?? record.mortality) > 0
                                 ? "var(--alert-danger)"
                                 : "inherit",
                           }}
                         >
-                          {record.mortality} birds
+                          {record.correctedMortality ?? record.mortality} birds
                         </span>
+                        {record.corrections?.some((c) => c.field === "MORTALITY") && (
+                          <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px" }}>
+                            corrected (was {record.mortality})
+                          </div>
+                        )}
                       </td>
                       <td>
-                        <div>{Number(record.feedUsedKg).toFixed(1)} kg</div>
-                        {record.feedType && (
-                          <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px" }}>
-                            🌾 {record.feedType.name}
-                          </div>
+                        {record.feedType ? (
+                          <span style={{ fontWeight: 600 }}>🌾 {record.feedType.name}</span>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)", fontSize: 12 }}>—</span>
                         )}
                         {record.avgWeightGrams && (
                           <div style={{ fontSize: "11px", color: "var(--color-primary)", marginTop: "2px" }}>
@@ -261,7 +278,20 @@ function DailyRecordsPage() {
                         )}
                       </td>
                       <td>
-                        <strong>{record.eggsCollected}</strong> eggs
+                        <strong>{Number(record.feedUsedKg).toFixed(1)} kg</strong>
+                      </td>
+                      <td>
+                        <strong>{record.correctedEggs ?? record.eggsCollected}</strong> eggs
+                        {record.corrections?.some((c) => c.field === "EGGS") && (
+                          <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px" }}>
+                            corrected (was {record.eggsCollected})
+                          </div>
+                        )}
+                        {record.corrections?.length > 0 && (
+                          <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }} title={record.corrections.map((c) => `${new Date(c.createdAt).toLocaleDateString()}: ${c.field} ${c.previousValue} → ${c.correctedValue} (${c.reason})`).join("\n")}>
+                          📝 {record.corrections.length} correction{record.corrections.length === 1 ? "" : "s"}
+                          </div>
+                        )}
                       </td>
                       <td style={{ textAlign: "right" }}>
                         <div
@@ -276,6 +306,17 @@ function DailyRecordsPage() {
                           >
                             Edit
                           </button>
+                          {isOutsideWindow(record) && (
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              style={{ padding: "4px 10px", fontSize: 12 }}
+                              onClick={() => setCorrectingRecord(record)}
+                              title="Record a correction for this immutable record"
+                            >
+                              Correct
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="danger-button"
@@ -312,6 +353,13 @@ function DailyRecordsPage() {
           </>
         )}
       </div>
+
+      <CorrectionModal
+        isOpen={Boolean(correctingRecord)}
+        onClose={() => setCorrectingRecord(null)}
+        onSaved={handleCorrectionSaved}
+        record={correctingRecord}
+      />
     </div>
   );
 }

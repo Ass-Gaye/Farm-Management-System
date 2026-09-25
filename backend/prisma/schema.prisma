@@ -72,6 +72,7 @@ model User {
   feedTypes FeedType[]
   inventoryMovements InventoryMovement[]
   depopulationEvents DepopulationEvent[]
+  dailyRecordCorrections DailyRecordCorrection[]
 
   @@map("users")
 }
@@ -114,12 +115,35 @@ model DailyRecord {
   flock         Flock?       @relation(fields: [flockId], references: [id], onDelete: SetNull)
   feedType      FeedType?    @relation(fields: [feedTypeId], references: [id], onDelete: SetNull)
   inventoryMovements InventoryMovement[]
+  corrections   DailyRecordCorrection[]
 
   // The API treats one record per house and date as the daily grain.
   @@unique([houseId, date])
   @@index([flockId])
   @@index([feedTypeId])
   @@map("daily_records")
+}
+
+// Append-only corrections for immutable DailyRecords (outside the
+// correction window). The original row is never modified; reporting sums
+// raw values + adjustments. See correction.service.js.
+model DailyRecordCorrection {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  dailyRecordId  Int
+  field          String   // MORTALITY, EGGS
+  previousValue  Float
+  correctedValue Float
+  adjustment     Float    // correctedValue - previousValue
+  reason         String
+  createdAt      DateTime @default(now())
+
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dailyRecord  DailyRecord @relation(fields: [dailyRecordId], references: [id], onDelete: Cascade)
+
+  @@index([dailyRecordId])
+  @@index([userId])
+  @@map("daily_record_corrections")
 }
 
 model Breed {

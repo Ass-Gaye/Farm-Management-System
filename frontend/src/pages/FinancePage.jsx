@@ -33,7 +33,7 @@ import {
 } from "../components/Icons";
 
 function FinancePage() {
-  const { houses, selectedHouse, breeds, showToast } = useFarm();
+  const { houses, selectedHouse, breeds, showToast, notifyFeedInventoryChanged } = useFarm();
 
   // Active view tab: "overview" | "sales" | "expenses" | "customers" | "suppliers" | "reports"
   const [activeTab, setActiveTab] = useState("overview");
@@ -233,6 +233,9 @@ function FinancePage() {
       }
       setDeleteTarget(null);
       loadFinanceData();
+      if (notifyFeedInventoryChanged) {
+        notifyFeedInventoryChanged();
+      }
     } catch (err) {
       showToast(err.message || "Failed to delete item.", "error");
       setDeleteTarget(null);
@@ -914,6 +917,11 @@ function FinancePage() {
                                 {tx.unitPrice ? ` @ ${currency} ${tx.unitPrice}` : ""}
                               </div>
                             )}
+                            {!isIncome && tx.feedType && (
+                              <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                                🌾 {tx.feedType.name} → shared stock
+                              </div>
+                            )}
                             {tx.description && (
                               <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
                                 {tx.description}
@@ -1486,6 +1494,11 @@ function FinancePage() {
                           </span>
                         ) : (
                           exp.description || "—"
+                        )}
+                        {exp.feedType && (
+                          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                            🌾 {exp.feedType.name} → shared stock
+                          </div>
                         )}
                       </td>
 

@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { runSerializable } = require("../lib/transaction");
 
 /**
  * Returns an inventory dashboard overview:
@@ -52,7 +53,7 @@ const getInventorySummary = async (req, res, next) => {
       include: {
         feedType: { select: { id: true, name: true, unit: true } },
         house: { select: { id: true, name: true } },
-        dailyRecord: { select: { id: true, date: true, eggsCollected: true, mortality: true } },
+        dailyRecord: { select: { id: true, date: true, eggsCollected: true, mortality: true, flock: { select: { id: true, name: true } } } },
         expense: {
           select: {
             id: true,
@@ -120,7 +121,7 @@ const getInventoryMovements = async (req, res, next) => {
         include: {
           feedType: { select: { id: true, name: true, unit: true, bagWeightKg: true } },
           house: { select: { id: true, name: true } },
-          dailyRecord: { select: { id: true, date: true, houseId: true } },
+          dailyRecord: { select: { id: true, date: true, houseId: true, flock: { select: { id: true, name: true } } } },
           expense: {
             select: {
               id: true,
@@ -173,6 +174,29 @@ const recordStockAdjustment = async (req, res, next) => {
     const fid = Number(feedTypeId);
     const adjustmentQty = Number(quantity);
 
+    // Manual endpoint only: ADJUSTMENT, WASTAGE, RETURN.
+    // PURCHASE/CONSUMPTION are system-generated; reject even if
+    // schema validation is bypassed by a raw API call.
+    const normalizedType = (type || "ADJUSTMENT").trim().toUpperCase();
+    if (normalizedType === "PURCHASE") {
+      return res.status(400).json({
+        success: false,
+        message: "PURCHASE movements are created automatically by feed purchase operations.",
+      });
+    }
+    if (normalizedType === "CONSUMPTION") {
+      return res.status(400).json({
+        success: false,
+        message: "CONSUMPTION movements are created automatically by Daily Records.",
+      });
+    }
+    if (!["ADJUSTMENT", "WASTAGE", "RETURN"].includes(normalizedType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Manual inventory movements must be ADJUSTMENT, WASTAGE, or RETURN.",
+      });
+    }
+
     if (adjustmentQty === 0) {
       return res.status(400).json({
         success: false,
@@ -180,7 +204,7 @@ const recordStockAdjustment = async (req, res, next) => {
       });
     }
 
-    // Verify ownership of feedType
+    // Ownership pre-checks (authoritative stock read happens inside tx).
     const feedType = await prisma.feedType.findFirst({
       where: { id: fid, userId },
     });
@@ -207,84 +231,123 @@ const recordStockAdjustment = async (req, res, next) => {
       verifiedHouseId = house.id;
     }
 
-    let adjustmentQtyInFeedUnit = adjustmentQty;
-    if (unit && unit.trim()) {
-      const pUnit = unit.trim().toLowerCase();
-      const fUnit = (feedType.unit || "").trim().toLowerCase();
-      const isKg = (u) => ["kg", "kgs", "kilogram", "kilograms"].includes(u);
-      const isBag = (u) => ["bag", "bags"].includes(u);
+    const convertToFeedUnit = (qty, feed) => {
+      let qtyInFeedUnit = qty;
+      if (unit && unit.trim()) {
+        const pUnit = unit.trim().toLowerCase();
+        const fUnit = (feed.unit || "").trim().toLowerCase();
+        const isKg = (u) => ["kg", "kgs", "kilogram", "kilograms"].includes(u);
+        const isBag = (u) => ["bag", "bags"].includes(u);
 
-      if (!isKg(pUnit) && !isBag(pUnit)) {
+        if (!isKg(pUnit) && !isBag(pUnit)) {
+          const error = new Error(
+            `Unsupported feed unit conversion from '${unit}'. Supported units are 'kg' and 'bags'.`
+          );
+          error.code = "UNSUPPORTED_UNIT";
+          throw error;
+        }
+
+        if (isBag(pUnit) && isKg(fUnit)) {
+          const bagWeight = Number(feed.bagWeightKg);
+          if (!bagWeight || bagWeight <= 0) {
+            const error = new Error(
+              `Feed type '${feed.name}' does not have a valid bag weight configured for conversion.`
+            );
+            error.code = "INVALID_BAG_WEIGHT";
+            throw error;
+          }
+          qtyInFeedUnit = qty * bagWeight;
+        } else if (isKg(pUnit) && isBag(fUnit)) {
+          const bagWeight = Number(feed.bagWeightKg);
+          if (!bagWeight || bagWeight <= 0) {
+            const error = new Error(
+              `Feed type '${feed.name}' does not have a valid bag weight configured for conversion.`
+            );
+            error.code = "INVALID_BAG_WEIGHT";
+            throw error;
+          }
+          qtyInFeedUnit = qty / bagWeight;
+        }
+      }
+      return qtyInFeedUnit;
+    };
+
+    let result;
+    try {
+      result = await runSerializable(async (tx) => {
+        // Critical read inside the transaction (concurrency-safe).
+        const freshFeed = await tx.feedType.findFirst({
+          where: { id: fid, userId },
+        });
+        if (!freshFeed) {
+          const error = new Error("Feed type not found or does not belong to your farm");
+          error.code = "FEED_NOT_FOUND";
+          throw error;
+        }
+
+        const adjustmentQtyInFeedUnit = convertToFeedUnit(adjustmentQty, freshFeed);
+        const currentStock = Number(freshFeed.currentStock);
+        const newStock = currentStock + adjustmentQtyInFeedUnit;
+
+        if (newStock < 0) {
+          const error = new Error(
+            `Adjustment of ${Math.abs(adjustmentQtyInFeedUnit)} ${freshFeed.unit} exceeds current stock of ${currentStock} ${freshFeed.unit}`
+          );
+          error.code = "NEGATIVE_STOCK";
+          throw error;
+        }
+
+        const unitCost = Number(freshFeed.unitCost) || 0;
+        const totalCost = Math.abs(adjustmentQtyInFeedUnit) * unitCost;
+
+        // 1. Update feedType currentStock
+        const updatedFeed = await tx.feedType.update({
+          where: { id: fid },
+          data: { currentStock: newStock },
+        });
+
+        // 2. Create inventory movement
+        const movement = await tx.inventoryMovement.create({
+          data: {
+            userId,
+            feedTypeId: fid,
+            houseId: verifiedHouseId,
+            type: normalizedType,
+            quantity: adjustmentQtyInFeedUnit,
+            unit: freshFeed.unit,
+            unitCost,
+            totalCost,
+            balanceAfter: newStock,
+            date: new Date(date),
+            reason: reason?.trim() || `Manual stock ${normalizedType.toLowerCase()}`,
+          },
+          include: {
+            feedType: { select: { id: true, name: true, unit: true } },
+            house: { select: { id: true, name: true } },
+          },
+        });
+
+        return { updatedFeed, movement };
+      });
+    } catch (error) {
+      if (
+        error.code === "UNSUPPORTED_UNIT" ||
+        error.code === "INVALID_BAG_WEIGHT" ||
+        error.code === "NEGATIVE_STOCK"
+      ) {
         return res.status(400).json({
           success: false,
-          message: `Unsupported feed unit conversion from '${unit}'. Supported units are 'kg' and 'bags'.`,
+          message: error.message,
         });
       }
-
-      if (isBag(pUnit) && isKg(fUnit)) {
-        const bagWeight = Number(feedType.bagWeightKg);
-        if (!bagWeight || bagWeight <= 0) {
-          return res.status(400).json({
-            success: false,
-            message: `Feed type '${feedType.name}' does not have a valid bag weight configured for conversion.`,
-          });
-        }
-        adjustmentQtyInFeedUnit = adjustmentQty * bagWeight;
-      } else if (isKg(pUnit) && isBag(fUnit)) {
-        const bagWeight = Number(feedType.bagWeightKg);
-        if (!bagWeight || bagWeight <= 0) {
-          return res.status(400).json({
-            success: false,
-            message: `Feed type '${feedType.name}' does not have a valid bag weight configured for conversion.`,
-          });
-        }
-        adjustmentQtyInFeedUnit = adjustmentQty / bagWeight;
+      if (error.code === "FEED_NOT_FOUND") {
+        return res.status(404).json({
+          success: false,
+          message: error.message,
+        });
       }
+      throw error;
     }
-
-    const currentStock = Number(feedType.currentStock);
-    const newStock = currentStock + adjustmentQtyInFeedUnit;
-
-    if (newStock < 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Adjustment of ${Math.abs(adjustmentQtyInFeedUnit)} ${feedType.unit} exceeds current stock of ${currentStock} ${feedType.unit}`,
-      });
-    }
-
-    const unitCost = Number(feedType.unitCost) || 0;
-    const totalCost = Math.abs(adjustmentQtyInFeedUnit) * unitCost;
-
-    const result = await prisma.$transaction(async (tx) => {
-      // 1. Update feedType currentStock
-      const updatedFeed = await tx.feedType.update({
-        where: { id: fid },
-        data: { currentStock: newStock },
-      });
-
-      // 2. Create inventory movement
-      const movement = await tx.inventoryMovement.create({
-        data: {
-          userId,
-          feedTypeId: fid,
-          houseId: verifiedHouseId,
-          type,
-          quantity: adjustmentQtyInFeedUnit,
-          unit: feedType.unit,
-          unitCost,
-          totalCost,
-          balanceAfter: newStock,
-          date: new Date(date),
-          reason: reason?.trim() || `Manual stock ${type.toLowerCase()}`,
-        },
-        include: {
-          feedType: { select: { id: true, name: true, unit: true } },
-          house: { select: { id: true, name: true } },
-        },
-      });
-
-      return { updatedFeed, movement };
-    });
 
     res.status(201).json({
       success: true,

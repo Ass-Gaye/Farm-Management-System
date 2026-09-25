@@ -1,4 +1,8 @@
 const prisma = require("../lib/prisma");
+const {
+  getAdjustmentMaps,
+  sumCorrectedMortality,
+} = require("../services/correction.service");
 
 /**
  * Creates a poultry house associated with the authenticated user.
@@ -154,9 +158,13 @@ const updateHouse = async (req, res, next) => {
       });
     }
 
-    const totalMortality = existingHouse.dailyRecords.reduce(
-      (total, record) => total + record.mortality,
-      0
+    const totalMortality = sumCorrectedMortality(
+      existingHouse.dailyRecords,
+      await getAdjustmentMaps(
+        prisma,
+        existingHouse.dailyRecords.map((r) => r.id),
+        req.user.id
+      )
     );
 
     if (birdsPlaced < totalMortality) {

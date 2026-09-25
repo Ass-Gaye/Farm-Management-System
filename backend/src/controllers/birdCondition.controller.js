@@ -1,4 +1,8 @@
 const prisma = require("../lib/prisma");
+const {
+  getAdjustmentMaps,
+  sumCorrectedMortality,
+} = require("../services/correction.service");
 
 /**
  * Validates bird condition counts against the available birds in the breed or house.
@@ -20,9 +24,13 @@ const validateBirdConditionLimits = async ({ houseId, breedId, totalConditionBir
     throw error;
   }
 
-  const totalMortality = house.dailyRecords.reduce(
-    (sum, record) => sum + record.mortality,
-    0
+  const totalMortality = sumCorrectedMortality(
+    house.dailyRecords,
+    await getAdjustmentMaps(
+      prisma,
+      house.dailyRecords.map((r) => r.id),
+      userId
+    )
   );
   const currentBirdsInHouse = house.birdsPlaced - totalMortality;
 

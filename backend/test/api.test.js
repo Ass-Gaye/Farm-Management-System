@@ -1368,8 +1368,26 @@ test("supports full authentication, user isolation, and features lifecycle", asy
   const feedAfterRestore = await request(`/api/feed-types/${feedTypeId}`, { headers: authHeaders1 });
   assert.equal(feedAfterRestore.body.data.currentStock, 495);
 
-  // Delete feed purchase expense and feed type
-  await request(`/api/expenses/${phase3ExpenseId}`, { method: "DELETE", headers: authHeaders1 });
+  // Delete feed purchase expense and feed type.
+  // NOTE (Phase 3.1 F8): reversing the 500 kg purchase is only safe once
+  // the 5 kg damaged-feed adjustment is covered. Top up +5 kg first so
+  // stock goes 495 -> 500, then the 500 kg reversal lands exactly at 0
+  // instead of being (correctly) rejected as a negative-stock reversal.
+  const topUpRes = await request("/api/inventory/adjust", {
+    method: "POST",
+    headers: authHeaders1,
+    body: JSON.stringify({
+      feedTypeId,
+      type: "ADJUSTMENT",
+      quantity: 5,
+      reason: "Cover damaged-feed adjustment before purchase cleanup",
+    }),
+  });
+  assert.equal(topUpRes.status, 201);
+  const delPhase3Exp = await request(`/api/expenses/${phase3ExpenseId}`, { method: "DELETE", headers: authHeaders1 });
+  assert.equal(delPhase3Exp.status, 200);
+  const feedAfterReversal = await request(`/api/feed-types/${feedTypeId}`, { headers: authHeaders1 });
+  assert.equal(feedAfterReversal.body.data.currentStock, 0);
   await request(`/api/feed-types/${feedTypeId}`, { method: "DELETE", headers: authHeaders1 });
 
   // Delete initial supplier

@@ -24,7 +24,7 @@ import {
 } from "../components/Icons";
 
 function InventoryPage() {
-  const { houses } = useFarm();
+  const { houses, feedInventoryVersion } = useFarm();
 
   const [activeTab, setActiveTab] = useState("stocks"); // "stocks" | "movements" | "reorder"
   const [feedTypes, setFeedTypes] = useState([]);
@@ -69,7 +69,7 @@ function InventoryPage() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [feedInventoryVersion]);
 
   const handleOpenAddFeed = () => {
     setEditingFeedType(null);
@@ -145,6 +145,25 @@ function InventoryPage() {
         return <span className="badge badge-secondary">RETURN</span>;
       default:
         return <span className="badge">{type}</span>;
+    }
+  };
+
+  // Human-readable labels for movement types. The underlying enum/database
+  // values are unchanged; this is presentation only.
+  const getMovementLabel = (type) => {
+    switch (type) {
+      case "PURCHASE":
+        return "🛒 Feed Purchase";
+      case "CONSUMPTION":
+        return "🐔 Daily Consumption";
+      case "ADJUSTMENT":
+        return "↕ Stock Adjustment";
+      case "WASTAGE":
+        return "⚠ Wastage";
+      case "RETURN":
+        return "↩ Return";
+      default:
+        return type;
     }
   };
 
@@ -313,7 +332,12 @@ function InventoryPage() {
       {activeTab === "stocks" && (
         <div className="card">
           <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
-            <h3 style={{ margin: 0 }}>Feed Stock Levels</h3>
+            <div>
+              <h3 style={{ margin: 0 }}>Feed Stock Levels</h3>
+              <div className="text-muted text-xs" style={{ marginTop: 2 }}>
+                Shared farm stock — one balance per feed type across all houses.
+              </div>
+            </div>
             <div className="search-bar" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <div style={{ position: "relative" }}>
                 <input
@@ -373,12 +397,16 @@ function InventoryPage() {
                       </td>
                       <td>
                         <strong style={{ fontSize: "15px" }}>
-                          {ft.currentStock} {ft.unit}
+                          {Number(ft.currentStock).toLocaleString()} {ft.unit}
                         </strong>
+                        <div className="text-muted text-xs" style={{ marginTop: 2 }}>
+                          Current stock on hand
+                        </div>
                         {ft.unit.toLowerCase().includes("bag") && ft.bagWeightKg && (
-                          <span className="text-muted text-xs ml-1">
-                            ({ft.currentStock * ft.bagWeightKg} kg)
-                          </span>
+                          <div className="text-muted text-xs">
+                            ≈ {(Number(ft.currentStock) * Number(ft.bagWeightKg)).toLocaleString()} kg
+                            <span> (1 bag = {Number(ft.bagWeightKg)} kg)</span>
+                          </div>
                         )}
                       </td>
                       <td>
@@ -483,7 +511,7 @@ function InventoryPage() {
                   <tr>
                     <th>Date</th>
                     <th>Feed Variety</th>
-                    <th>Movement Type</th>
+                    <th>What Happened</th>
                     <th>Quantity Change</th>
                     <th>Remaining Stock</th>
                     <th>Details / Reference</th>
@@ -500,7 +528,10 @@ function InventoryPage() {
                         <td>
                           <strong>{m.feedType?.name || "Feed Item"}</strong>
                         </td>
-                        <td>{getMovementBadge(m.type)}</td>
+                        <td>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{getMovementLabel(m.type)}</div>
+                          <div style={{ marginTop: 2 }}>{getMovementBadge(m.type)}</div>
+                        </td>
                         <td>
                           <span
                             style={{
@@ -529,6 +560,17 @@ function InventoryPage() {
                                   : "Daily consumption"
                                 : "Manual update")}
                           </span>
+                          {(m.house || m.dailyRecord?.flock) && (
+                            <div className="text-muted text-xs" style={{ marginTop: 2 }}>
+                              {[m.house?.name, m.dailyRecord?.flock?.name].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
+                          <div className="text-muted text-xs" style={{ marginTop: 2 }}>
+                            {m.dailyRecordId ? `Daily Record #${m.dailyRecordId}` : ""}
+                            {m.dailyRecordId && m.expenseId ? " · " : ""}
+                            {m.expenseId ? `Expense #${m.expenseId}` : ""}
+                            {m.unitCost != null ? ` · @ ${m.unitCost}/${m.unit}` : ""}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -646,7 +688,7 @@ function InventoryPage() {
       <ConfirmDialog
         isOpen={Boolean(deleteConfirmFeed)}
         title="Remove Feed Type"
-        message={`Are you sure you want to remove "${deleteConfirmFeed?.name}"? If historical records exist, it will be safely deactivated instead of deleted.`}
+        message={`Are you sure you want to permanently delete "${deleteConfirmFeed?.name}"? Its movement history will be removed and linked daily records and expenses will be unlinked. This cannot be undone.${Number(deleteConfirmFeed?.currentStock) > 0 ? ` It currently holds ${deleteConfirmFeed.currentStock} ${deleteConfirmFeed.unit} — bring stock to zero first.` : ""}`}
         confirmText="Remove"
         onConfirm={handleDeleteFeed}
         onCancel={() => setDeleteConfirmFeed(null)}

@@ -45,6 +45,14 @@ export function FarmProvider({ children }) {
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Feed/inventory/finance freshness signal. Bumped after any mutation
+  // that affects stock (daily consumption, purchases, adjustments) so
+  // pages like InventoryPage refetch instead of showing stale snapshots.
+  const [feedInventoryVersion, setFeedInventoryVersion] = useState(0);
+  const notifyFeedInventoryChanged = useCallback(() => {
+    setFeedInventoryVersion((v) => v + 1);
+  }, []);
+
   const selectedHouseId = selectedHouse?.id;
 
   // Toast notification
@@ -288,6 +296,7 @@ export function FarmProvider({ children }) {
         setError("");
         await deleteDailyRecord(recordId);
         await reloadHouseData();
+        notifyFeedInventoryChanged();
         showToast("Daily production record deleted.");
       } catch (err) {
         setError(err.message || "Failed to delete daily record.");
@@ -296,7 +305,7 @@ export function FarmProvider({ children }) {
         setConfirmDialog(null);
       }
     },
-    [reloadHouseData, showToast]
+    [reloadHouseData, notifyFeedInventoryChanged, showToast]
   );
 
   // Delete Breed
@@ -440,6 +449,8 @@ export function FarmProvider({ children }) {
     setError,
     loadHouseData,
     reloadHouseData,
+    feedInventoryVersion,
+    notifyFeedInventoryChanged,
     toast,
     showToast,
     closeToast,

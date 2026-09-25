@@ -217,6 +217,38 @@ const deleteCustomer = async (req, res, next) => {
       });
     }
 
+    // Mirror supplier protection: block deletion while money is owed.
+    const unsettledSales = await prisma.income.findMany({
+      where: {
+        customerId: Number(id),
+        userId,
+        OR: [
+          { amountDue: { gt: 0 } },
+          { paymentStatus: { in: ["PARTIALLY_PAID", "UNPAID"] } },
+        ],
+      },
+      select: {
+        amount: true,
+        amountPaid: true,
+        amountDue: true,
+      },
+    });
+
+    const totalOutstanding = unsettledSales.reduce((sum, sale) => {
+      const due =
+        sale.amountDue !== null && sale.amountDue !== undefined
+          ? Number(sale.amountDue)
+          : Math.max(0, Number(sale.amount) - Number(sale.amountPaid || 0));
+      return sum + due;
+    }, 0);
+
+    if (totalOutstanding > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete customer while an outstanding balance exists. GMD ${totalOutstanding.toLocaleString()} is still outstanding. Outstanding balances must be settled before deletion.`,
+      });
+    }
+
     await prisma.customer.delete({
       where: { id: Number(id) },
     });

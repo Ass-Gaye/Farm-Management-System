@@ -135,17 +135,22 @@ const updateDailyRecordSchema = z.object({
     })
     .optional()
     .nullable(),
+  // Partial updates allowed (unlike create): every provided field is still
+  // fully validated by the controller against bird/feed/date/house rules.
   mortality: z
     .number()
     .int("Mortality must be a whole number")
-    .nonnegative("Mortality cannot be negative"),
+    .nonnegative("Mortality cannot be negative")
+    .optional(),
   feedUsedKg: z
     .number()
-    .nonnegative("Feed used cannot be negative"),
+    .nonnegative("Feed used cannot be negative")
+    .optional(),
   eggsCollected: z
     .number()
     .int("Eggs collected must be a whole number")
-    .nonnegative("Eggs collected cannot be negative"),
+    .nonnegative("Eggs collected cannot be negative")
+    .optional(),
   avgWeightGrams: z
     .number()
     .nonnegative("Average weight cannot be negative")
@@ -1156,13 +1161,19 @@ const updateFeedTypeSchema = z.object({
 );
 
 // Stock Adjustment Schema
+// MANUAL endpoint only: ADJUSTMENT, WASTAGE, RETURN.
+// PURCHASE and CONSUMPTION are system-generated (feed purchase / Daily Record)
+// and must be rejected here and in the controller.
 const stockAdjustmentSchema = z.object({
   feedTypeId: z
     .number()
     .int("Feed type ID must be a whole number")
     .positive("Feed type ID must be greater than 0"),
   type: z
-    .enum(["ADJUSTMENT", "WASTAGE", "RETURN", "PURCHASE", "CONSUMPTION"])
+    .enum(["ADJUSTMENT", "WASTAGE", "RETURN"], {
+      error:
+        "Manual inventory movements must be ADJUSTMENT, WASTAGE, or RETURN. PURCHASE movements are created automatically by feed purchase operations and CONSUMPTION movements are created automatically by Daily Records.",
+    })
     .default("ADJUSTMENT"),
   quantity: z.coerce
     .number({ error: "Quantity is required" })
@@ -1185,6 +1196,21 @@ const stockAdjustmentSchema = z.object({
     .positive()
     .optional()
     .nullable(),
+});
+
+// Daily Record Correction Schemas (append-only history fixes)
+const createCorrectionSchema = z.object({
+  field: z.enum(["MORTALITY", "EGGS"], {
+    error: "Correction field must be MORTALITY or EGGS",
+  }),
+  correctedValue: z
+    .number()
+    .int("Corrected value must be a whole number")
+    .nonnegative("Corrected value cannot be negative"),
+  reason: z
+    .string()
+    .trim()
+    .min(1, "A reason is required for corrections"),
 });
 
 // Param Schemas
@@ -1286,6 +1312,7 @@ module.exports = {
   createFeedTypeSchema,
   updateFeedTypeSchema,
   stockAdjustmentSchema,
+  createCorrectionSchema,
   idParamSchema,
   houseIdParamSchema,
   flockIdParamSchema,

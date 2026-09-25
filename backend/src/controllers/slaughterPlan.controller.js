@@ -1,5 +1,10 @@
 const prisma = require("../lib/prisma");
 const { computeSlaughterStatus } = require("../services/slaughter.service");
+const {
+  getAdjustmentMaps,
+  sumCorrectedMortality,
+} = require("../services/correction.service");
+const { runSerializable } = require("../lib/transaction");
 
 /**
  * Validates dates and bird count limits for slaughter planning.
@@ -44,9 +49,13 @@ const validateSlaughterPlan = async ({
     throw error;
   }
 
-  const totalMortality = house.dailyRecords.reduce(
-    (sum, record) => sum + record.mortality,
-    0
+  const totalMortality = sumCorrectedMortality(
+    house.dailyRecords,
+    await getAdjustmentMaps(
+      prisma,
+      house.dailyRecords.map((r) => r.id),
+      userId
+    )
   );
   const totalDepopulated = (house.flocks || []).reduce(
     (total, flock) =>
@@ -364,85 +373,132 @@ const toggleSlaughterPlanComplete = async (req, res, next) => {
         ? "Completed"
         : "Upcoming";
 
-    const updated = await prisma.slaughterPlan.update({
-      where: {
-        id: Number(id),
-      },
-      data: {
-        status: newStatus,
-      },
-      include: {
-        house: true,
-        breed: true,
-      },
-    });
-
-    // Slaughter depopulation event integration
-    let targetFlockId = existingPlan.flockId;
-    if (!targetFlockId) {
-      const activeFlock = await prisma.flock.findFirst({
-        where: { houseId: existingPlan.houseId, userId: req.user.id, status: "ACTIVE" },
+    // All writes (plan status + automatic depopulation event + flock sync)
+    // succeed together or roll back together.
+    const updated = await runSerializable(async (tx) => {
+      const ownedPlan = await tx.slaughterPlan.findFirst({
+        where: {
+          id: Number(id),
+          house: { userId: req.user.id },
+        },
       });
-      if (activeFlock) {
-        targetFlockId = activeFlock.id;
+      if (!ownedPlan) {
+        const error = new Error("Slaughter plan not found");
+        error.code = "PLAN_NOT_FOUND";
+        throw error;
       }
-    }
 
-    if (targetFlockId) {
-      const { calculateLiveBirds } = require("./depopulation.controller");
-      if (newStatus === "Completed") {
-        const existingEvent = await prisma.depopulationEvent.findFirst({
-          where: {
-            userId: req.user.id,
-            flockId: targetFlockId,
-            reason: "SLAUGHTERED",
-            notes: `Slaughter plan #${existingPlan.id} completed`,
+      const saved = await tx.slaughterPlan.update({
+        where: { id: Number(id) },
+        data: { status: newStatus },
+        include: { house: true, breed: true },
+      });
+
+      // Slaughter depopulation event integration
+      let targetFlockId = ownedPlan.flockId;
+      if (!targetFlockId) {
+        const activeFlock = await tx.flock.findFirst({
+          where: { houseId: ownedPlan.houseId, userId: req.user.id, status: "ACTIVE" },
+        });
+        if (activeFlock) {
+          targetFlockId = activeFlock.id;
+        }
+      }
+
+      if (targetFlockId) {
+        const flockWithCounts = await tx.flock.findUnique({
+          where: { id: targetFlockId },
+          include: {
+            dailyRecords: { select: { id: true, mortality: true } },
+            depopulationEvents: { select: { id: true, quantity: true } },
           },
         });
 
-        if (!existingEvent) {
-          const birdStats = await calculateLiveBirds(targetFlockId);
-          const qtyToDepopulate = Math.min(existingPlan.numberOfBirds, birdStats?.liveBirds || 0);
+        // Corrected mortality so historical corrections flow into
+        // slaughter quantities and flock sync.
+        const countAdj = await getAdjustmentMaps(
+          tx,
+          (flockWithCounts?.dailyRecords || []).map((r) => r.id),
+          req.user.id
+        );
+        const correctedSum = (rows) => sumCorrectedMortality(rows, countAdj);
 
-          if (qtyToDepopulate > 0) {
-            await prisma.depopulationEvent.create({
-              data: {
-                userId: req.user.id,
-                flockId: targetFlockId,
-                quantity: qtyToDepopulate,
-                reason: "SLAUGHTERED",
-                date: new Date(),
-                notes: `Slaughter plan #${existingPlan.id} completed`,
+        if (newStatus === "Completed") {
+          const existingEvent = await tx.depopulationEvent.findFirst({
+            where: {
+              userId: req.user.id,
+              flockId: targetFlockId,
+              reason: "SLAUGHTERED",
+              notes: `Slaughter plan #${ownedPlan.id} completed`,
+            },
+          });
+
+          if (!existingEvent && flockWithCounts) {
+            const totalMortality = correctedSum(flockWithCounts.dailyRecords);
+            const totalDepop = flockWithCounts.depopulationEvents.reduce((s, e) => s + e.quantity, 0);
+            const liveBirds = Math.max(0, flockWithCounts.birdsPlaced - totalMortality - totalDepop);
+            const qtyToDepopulate = Math.min(ownedPlan.numberOfBirds, liveBirds);
+
+            if (qtyToDepopulate > 0) {
+              await tx.depopulationEvent.create({
+                data: {
+                  userId: req.user.id,
+                  flockId: targetFlockId,
+                  quantity: qtyToDepopulate,
+                  reason: "SLAUGHTERED",
+                  date: new Date(),
+                  notes: `Slaughter plan #${ownedPlan.id} completed`,
+                },
+              });
+
+              const refreshed = await tx.flock.findUnique({
+                where: { id: targetFlockId },
+                include: {
+                  dailyRecords: { select: { id: true, mortality: true } },
+                  depopulationEvents: { select: { quantity: true } },
+                },
+              });
+              const mort = correctedSum(refreshed.dailyRecords);
+              const dep = refreshed.depopulationEvents.reduce((s, e) => s + e.quantity, 0);
+              await tx.flock.update({
+                where: { id: targetFlockId },
+                data: { currentBirds: Math.max(0, refreshed.birdsPlaced - mort - dep) },
+              });
+            }
+          }
+        } else {
+          // Toggled back from completed - remove completion event
+          const deleted = await tx.depopulationEvent.deleteMany({
+            where: {
+              userId: req.user.id,
+              flockId: targetFlockId,
+              reason: "SLAUGHTERED",
+              notes: `Slaughter plan #${ownedPlan.id} completed`,
+            },
+          });
+
+          if (deleted.count > 0 && flockWithCounts) {
+            const refreshed = await tx.flock.findUnique({
+              where: { id: targetFlockId },
+              include: {
+                dailyRecords: { select: { id: true, mortality: true } },
+                depopulationEvents: { select: { quantity: true } },
               },
             });
-
-            const updatedStats = await calculateLiveBirds(targetFlockId);
-            await prisma.flock.update({
-              where: { id: targetFlockId },
-              data: { currentBirds: updatedStats.liveBirds },
-            });
+            if (refreshed) {
+              const mort = correctedSum(refreshed.dailyRecords);
+              const dep = refreshed.depopulationEvents.reduce((s, e) => s + e.quantity, 0);
+              await tx.flock.update({
+                where: { id: targetFlockId },
+                data: { currentBirds: Math.max(0, refreshed.birdsPlaced - mort - dep) },
+              });
+            }
           }
         }
-      } else {
-        // Toggled back from completed - remove completion event
-        const deleted = await prisma.depopulationEvent.deleteMany({
-          where: {
-            userId: req.user.id,
-            flockId: targetFlockId,
-            reason: "SLAUGHTERED",
-            notes: `Slaughter plan #${existingPlan.id} completed`,
-          },
-        });
-
-        if (deleted.count > 0) {
-          const updatedStats = await calculateLiveBirds(targetFlockId);
-          await prisma.flock.update({
-            where: { id: targetFlockId },
-            data: { currentBirds: updatedStats.liveBirds },
-          });
-        }
       }
-    }
+
+      return saved;
+    });
 
     res.json({
       success: true,
@@ -453,6 +509,12 @@ const toggleSlaughterPlanComplete = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (error.code === "PLAN_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "Slaughter plan not found",
+      });
+    }
     next(error);
   }
 };

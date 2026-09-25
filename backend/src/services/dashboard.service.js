@@ -1,5 +1,10 @@
 const prisma = require("../lib/prisma");
 const { computeSlaughterStatus } = require("./slaughter.service");
+const {
+  getAdjustmentMaps,
+  sumCorrectedMortality,
+  sumCorrectedEggs,
+} = require("./correction.service");
 
 /**
  * Loads a house belonging to the user and aggregates production, breed, health,
@@ -56,21 +61,27 @@ const getHouseDashboard = async (houseId, userId) => {
     return null;
   }
 
-  // Daily records aggregations
-  const totalMortality = house.dailyRecords.reduce(
-    (total, record) => total + record.mortality,
-    0
+  // Daily records aggregations.
+  // SCOPE NOTE: house-level and flock-level rows may describe the same
+  // physical activity, so these sums cover the house grain as stored.
+  // Flock-specific views filter by flockId instead; never add both grains
+  // together for the same house/day (see getRecordScope in
+  // dailyRecord.controller.js).
+  // CORRECTION NOTE: sums use corrected values (raw + append-only
+  // adjustments) so historical corrections flow into reporting.
+  const adjMap = await getAdjustmentMaps(
+    prisma,
+    house.dailyRecords.map((r) => r.id),
+    userId
   );
+  const totalMortality = sumCorrectedMortality(house.dailyRecords, adjMap);
 
   const totalFeedUsed = house.dailyRecords.reduce(
     (total, record) => total + record.feedUsedKg,
     0
   );
 
-  const totalEggsCollected = house.dailyRecords.reduce(
-    (total, record) => total + record.eggsCollected,
-    0
-  );
+  const totalEggsCollected = sumCorrectedEggs(house.dailyRecords, adjMap);
 
   // Sum depopulation events across all flocks in this house
   const totalDepopulated = (house.flocks || []).reduce(

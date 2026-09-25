@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
 import { recordStockAdjustment } from "../services/api";
+import { FarmContext } from "../context/farmContextDef";
 
 const commonPresets = [
   { label: "Damaged feed (moisture / water)", type: "WASTAGE", direction: "SUBTRACT" },
@@ -28,6 +29,8 @@ function StockAdjustmentModal({
   const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const farmContext = useContext(FarmContext);
+  const notifyFeedInventoryChanged = farmContext?.notifyFeedInventoryChanged || null;
 
   // Sync state whenever modal is opened or target feed changes
   useEffect(() => {
@@ -168,6 +171,9 @@ function StockAdjustmentModal({
       });
 
       onSaved();
+      if (notifyFeedInventoryChanged) {
+        notifyFeedInventoryChanged();
+      }
       onClose();
     } catch (err) {
       setError(err.message || "Failed to record stock adjustment");

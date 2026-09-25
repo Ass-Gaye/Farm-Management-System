@@ -256,11 +256,10 @@ const forgotPassword = async (req, res, next) => {
       `Password reset requested for user id=${user.id}. Email dispatched (or logged in dev), token valid 1h.`
     );
 
-    // Test/dev backdoor only: expose the token so integration tests can
-    // complete the reset flow without a mailbox.
-    const exposeToken =
-      process.env.ALLOW_RESET_TOKEN_IN_RESPONSE === "true" ||
-      process.env.NODE_ENV === "test";
+    // Explicit opt-in only: expose the token so integration tests can
+    // complete the reset flow without a mailbox. NODE_ENV must NOT
+    // grant exposure on its own (production misconfiguration risk).
+    const exposeToken = process.env.ALLOW_RESET_TOKEN_IN_RESPONSE === "true";
 
     res.json({
       success: true,

@@ -1,5 +1,34 @@
 const prisma = require("../lib/prisma");
 const { calculateConsumptionInFeedUnit } = require("../services/feed-unit.service");
+const { isWithinCorrectionWindow, immutableRecordError } = require("../lib/correctionWindow");
+const {
+  getAdjustmentMaps,
+  correctedMortalityOf,
+  correctedEggsOf,
+  sumCorrectedMortality,
+  sumCorrectedEggs,
+} = require("../services/correction.service");
+
+/**
+ * DAILY RECORD SCOPE SEMANTICS (HOUSE vs FLOCK)
+ *
+ * A DailyRecord applies to exactly one scope, encoded by `flockId`:
+ *   - flockId === null  -> HOUSE scope: whole-house activity for the day.
+ *   - flockId !== null  -> FLOCK scope: activity of that specific flock
+ *     (which must belong to the record's house; enforced as
+ *     FLOCK_HOUSE_MISMATCH).
+ *
+ * AGGREGATION RULE (prevents double counting): house-level and flock-level
+ * rows are independent records that may describe the SAME physical activity
+ * (e.g. a farmer logs 150 kg at house level AND 80/70 kg per flock).
+ * Reporting MUST therefore aggregate within a single grain only:
+ *   - house totals  = SUM over HOUSE-scope rows (+ optionally flock rows,
+ *     never both without an explicit scope filter);
+ *   - flock totals  = SUM over rows with that flockId.
+ * The dashboard sums the house grain; flock views filter by flockId.
+ * Never SUM(house rows + flock rows) for the same house/day.
+ */
+const getRecordScope = (record) => (record && record.flockId ? "FLOCK" : "HOUSE");
 
 const runSerializable = async (operation) => {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -50,7 +79,7 @@ const createDailyRecord = async (req, res, next) => {
             userId: req.user.id,
           },
           include: {
-            dailyRecords: { select: { mortality: true } },
+            dailyRecords: { select: { id: true, mortality: true } },
             depopulationEvents: { select: { quantity: true } },
           },
         });
@@ -90,7 +119,7 @@ const createDailyRecord = async (req, res, next) => {
             const availableDisplay = `${currentStock} ${feedType.unit}`;
             const requiredDisplay = `${consumedInFeedUnit} ${feedType.unit}`;
             const error = new Error(
-              `Insufficient feed stock. Available: ${availableDisplay}, required: ${requiredDisplay}.`
+              `Insufficient feed stock for ${feedType.name}. Available: ${availableDisplay}, required: ${requiredDisplay}.`
             );
             error.code = "INSUFFICIENT_STOCK";
             throw error;
@@ -98,9 +127,17 @@ const createDailyRecord = async (req, res, next) => {
         }
       }
 
-      // Validate mortality against flock or house bird count
+      // Validate mortality against flock or house bird count.
+      // Sibling sums use corrected mortality so prior corrections free
+      // up (or consume) headroom instead of being ignored.
+      let flockAdj = null;
       if (flock) {
-        const flockMortality = flock.dailyRecords.reduce((sum, r) => sum + r.mortality, 0);
+        flockAdj = await getAdjustmentMaps(
+          transaction,
+          flock.dailyRecords.map((r) => r.id),
+          req.user.id
+        );
+        const flockMortality = sumCorrectedMortality(flock.dailyRecords, flockAdj);
         const flockDepopulated = flock.depopulationEvents.reduce((sum, e) => sum + e.quantity, 0);
         const liveBirds = Math.max(0, flock.birdsPlaced - flockMortality - flockDepopulated);
         if (mortality > liveBirds) {
@@ -111,10 +148,12 @@ const createDailyRecord = async (req, res, next) => {
           throw error;
         }
       } else {
-        const totalPreviousMortality = house.dailyRecords.reduce(
-          (total, record) => total + record.mortality,
-          0
+        const houseAdj = await getAdjustmentMaps(
+          transaction,
+          house.dailyRecords.map((r) => r.id),
+          req.user.id
         );
+        const totalPreviousMortality = sumCorrectedMortality(house.dailyRecords, houseAdj);
 
         const currentBirds = house.birdsPlaced - totalPreviousMortality;
 
@@ -145,7 +184,8 @@ const createDailyRecord = async (req, res, next) => {
       });
 
       if (flock) {
-        const flockMortality = flock.dailyRecords.reduce((sum, r) => sum + r.mortality, 0) + mortality;
+        const flockMortality =
+          sumCorrectedMortality(flock.dailyRecords, flockAdj) + mortality;
         const flockDepopulated = flock.depopulationEvents.reduce((sum, e) => sum + e.quantity, 0);
         await transaction.flock.update({
           where: { id: flock.id },
@@ -156,6 +196,9 @@ const createDailyRecord = async (req, res, next) => {
       }
 
       // Integrate Feed Inventory Deduction if feedTypeId and feedUsedKg > 0
+      // Shared farm stock: the FeedType row is per user (not per house);
+      // house/flock on the movement only records WHERE it was consumed.
+      let inventoryEffect = null;
       if (feedType && Number(feedUsedKg) > 0) {
         const currentStock = Number(feedType.currentStock);
         const balanceAfter = currentStock - consumedInFeedUnit;
@@ -182,15 +225,26 @@ const createDailyRecord = async (req, res, next) => {
             reason: `Daily feed consumption for ${house.name} (${feedUsedKg} kg)`,
           },
         });
+
+        inventoryEffect = {
+          feedTypeId: feedType.id,
+          feedName: feedType.name,
+          unit: feedType.unit,
+          feedUsedKg: Number(feedUsedKg),
+          consumedInFeedUnit,
+          stockBefore: currentStock,
+          stockAfter: balanceAfter,
+        };
       }
 
-      return record;
+      return { record, inventory: inventoryEffect };
     });
 
     res.status(201).json({
       success: true,
       message: "Daily record created successfully",
-      data: dailyRecord,
+      data: dailyRecord.record,
+      inventory: dailyRecord.inventory,
     });
   } catch (error) {
     if (
@@ -271,15 +325,41 @@ const getDailyRecords = async (req, res, next) => {
         house: true,
         flock: { select: { id: true, name: true, purpose: true } },
         feedType: { select: { id: true, name: true, unit: true, bagWeightKg: true } },
+        corrections: {
+          select: {
+            id: true, field: true, previousValue: true,
+            correctedValue: true, adjustment: true, reason: true,
+            createdAt: true, user: { select: { id: true, name: true } },
+          },
+          orderBy: { createdAt: "asc" },
+        },
       },
       orderBy: {
         date: "desc",
       },
     });
 
+    // Attach corrected values (raw + append-only adjustments) so every
+    // consumer sees the same corrected result without rewriting history.
+    const adjMap = await getAdjustmentMaps(
+      prisma,
+      records.map((r) => r.id),
+      req.user.id
+    );
+
     res.json({
       success: true,
-      data: records,
+      data: records.map((r) => ({
+        ...r,
+        corrections: r.corrections.map((c) => ({
+          ...c,
+          previousValue: Number(c.previousValue),
+          correctedValue: Number(c.correctedValue),
+          adjustment: Number(c.adjustment),
+        })),
+        correctedMortality: correctedMortalityOf(r, adjMap),
+        correctedEggs: correctedEggsOf(r, adjMap),
+      })),
     });
   } catch (error) {
     next(error);
@@ -303,6 +383,14 @@ const getDailyRecordById = async (req, res, next) => {
       include: {
         house: true,
         feedType: { select: { id: true, name: true, unit: true, bagWeightKg: true } },
+        corrections: {
+          select: {
+            id: true, field: true, previousValue: true,
+            correctedValue: true, adjustment: true, reason: true,
+            createdAt: true, user: { select: { id: true, name: true } },
+          },
+          orderBy: { createdAt: "asc" },
+        },
       },
     });
 
@@ -313,9 +401,21 @@ const getDailyRecordById = async (req, res, next) => {
       });
     }
 
+    const adjMap = await getAdjustmentMaps(prisma, [record.id], req.user.id);
+
     res.json({
       success: true,
-      data: record,
+      data: {
+        ...record,
+        corrections: record.corrections.map((c) => ({
+          ...c,
+          previousValue: Number(c.previousValue),
+          correctedValue: Number(c.correctedValue),
+          adjustment: Number(c.adjustment),
+        })),
+        correctedMortality: correctedMortalityOf(record, adjMap),
+        correctedEggs: correctedEggsOf(record, adjMap),
+      },
     });
   } catch (error) {
     next(error);
@@ -349,6 +449,12 @@ const updateDailyRecord = async (req, res, next) => {
         const error = new Error("Daily record not found");
         error.code = "RECORD_NOT_FOUND";
         throw error;
+      }
+
+      // Historical records outside the correction window are immutable:
+      // correct them with a reversal entry instead of editing.
+      if (!isWithinCorrectionWindow(existingRecord.createdAt)) {
+        throw immutableRecordError("Daily record");
       }
 
       const house = await transaction.poultryHouse.findFirst({
@@ -392,9 +498,14 @@ const updateDailyRecord = async (req, res, next) => {
       const finalMortality = mortality !== undefined ? Number(mortality) : existingRecord.mortality;
 
       if (flock) {
+        const flockAdj = await getAdjustmentMaps(
+          transaction,
+          flock.dailyRecords.map((r) => r.id),
+          req.user.id
+        );
         const otherMortality = flock.dailyRecords
           .filter((r) => r.id !== Number(id))
-          .reduce((sum, r) => sum + r.mortality, 0);
+          .reduce((sum, r) => sum + r.mortality + ((flockAdj.get(r.id)?.mortality) || 0), 0);
         const flockDepopulated = flock.depopulationEvents.reduce((sum, e) => sum + e.quantity, 0);
         const availableInFlock = Math.max(0, flock.birdsPlaced - otherMortality - flockDepopulated);
         if (finalMortality > availableInFlock) {
@@ -405,9 +516,14 @@ const updateDailyRecord = async (req, res, next) => {
           throw error;
         }
       } else {
+        const houseAdj = await getAdjustmentMaps(
+          transaction,
+          house.dailyRecords.map((r) => r.id),
+          req.user.id
+        );
         const totalOtherMortality = house.dailyRecords
           .filter((record) => record.id !== Number(id))
-          .reduce((total, record) => total + record.mortality, 0);
+          .reduce((total, record) => total + record.mortality + ((houseAdj.get(record.id)?.mortality) || 0), 0);
 
         const currentBirds = house.birdsPlaced - totalOtherMortality;
 
@@ -466,6 +582,7 @@ const updateDailyRecord = async (req, res, next) => {
       // 3. Apply new consumption if newFeedType and feedUsedKg > 0
       const finalFeedUsedKg = feedUsedKg !== undefined ? Number(feedUsedKg) : existingRecord.feedUsedKg;
       let newBalanceAfter = null;
+      let inventoryEffect = null;
 
       if (newFeedType && finalFeedUsedKg > 0) {
         const consumedInFeedUnit = calculateConsumptionInFeedUnit(finalFeedUsedKg, newFeedType);
@@ -480,7 +597,7 @@ const updateDailyRecord = async (req, res, next) => {
           const availableDisplay = `${currentAvail} ${newFeedType.unit}`;
           const requiredDisplay = `${consumedInFeedUnit} ${newFeedType.unit}`;
           const error = new Error(
-            `Insufficient feed stock. Available: ${availableDisplay}, required: ${requiredDisplay}.`
+            `Insufficient feed stock for ${newFeedType.name}. Available: ${availableDisplay}, required: ${requiredDisplay}.`
           );
           error.code = "INSUFFICIENT_STOCK";
           throw error;
@@ -509,6 +626,16 @@ const updateDailyRecord = async (req, res, next) => {
             reason: `Daily feed consumption for ${house.name} (${finalFeedUsedKg} kg)`,
           },
         });
+
+        inventoryEffect = {
+          feedTypeId: newFeedType.id,
+          feedName: newFeedType.name,
+          unit: newFeedType.unit,
+          feedUsedKg: finalFeedUsedKg,
+          consumedInFeedUnit,
+          stockBefore: currentAvail,
+          stockAfter: newBalanceAfter,
+        };
       }
 
       // Re-sync previous flock's currentBirds if flock changed
@@ -545,7 +672,7 @@ const updateDailyRecord = async (req, res, next) => {
         });
       }
 
-      return transaction.dailyRecord.update({
+      const savedRecord = await transaction.dailyRecord.update({
         where: {
           id: Number(id),
         },
@@ -569,12 +696,15 @@ const updateDailyRecord = async (req, res, next) => {
           house: true,
         },
       });
+
+      return { record: savedRecord, inventory: inventoryEffect };
     });
 
     res.json({
       success: true,
       message: "Daily record updated successfully",
-      data: updatedRecord,
+      data: updatedRecord.record,
+      inventory: updatedRecord.inventory,
     });
   } catch (error) {
     if (
@@ -605,6 +735,13 @@ const updateDailyRecord = async (req, res, next) => {
 
     if (error.code === "MORTALITY_LIMIT") {
       return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    if (error.code === "RECORD_IMMUTABLE") {
+      return res.status(403).json({
         success: false,
         message: error.message,
       });
@@ -652,6 +789,12 @@ const deleteDailyRecord = async (req, res, next) => {
         const error = new Error("Daily record not found");
         error.code = "RECORD_NOT_FOUND";
         throw error;
+      }
+
+      // Historical records outside the correction window are immutable:
+      // correct them with a reversal entry instead of deleting.
+      if (!isWithinCorrectionWindow(record.createdAt)) {
+        throw immutableRecordError("Daily record");
       }
 
       // Revert any consumption movements
@@ -717,6 +860,12 @@ const deleteDailyRecord = async (req, res, next) => {
         message: error.message,
       });
     }
+    if (error.code === "RECORD_IMMUTABLE") {
+      return res.status(403).json({
+        success: false,
+        message: error.message,
+      });
+    }
     if (error.code === "P2034") {
       return res.status(409).json({
         success: false,
@@ -728,6 +877,7 @@ const deleteDailyRecord = async (req, res, next) => {
 };
 
 module.exports = {
+  getRecordScope,
   calculateConsumptionInFeedUnit,
   createDailyRecord,
   getDailyRecords,

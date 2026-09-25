@@ -174,6 +174,17 @@ export const deleteDailyRecord = async (recordId) => {
   });
 };
 
+export const createDailyRecordCorrection = async (recordId, correctionData) => {
+  return request(`/daily-records/${recordId}/corrections`, {
+    method: "POST",
+    body: JSON.stringify(correctionData),
+  });
+};
+
+export const getDailyRecordCorrections = async (recordId) => {
+  return request(`/daily-records/${recordId}/corrections`);
+};
+
 // ==================== Dashboard ====================
 
 export const getHouseDashboard = async (houseId) => {

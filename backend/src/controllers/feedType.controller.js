@@ -80,7 +80,7 @@ const getFeedTypeById = async (req, res, next) => {
           take: 50,
           include: {
             house: { select: { id: true, name: true } },
-            dailyRecord: { select: { id: true, date: true, houseId: true } },
+            dailyRecord: { select: { id: true, date: true, houseId: true, flock: { select: { id: true, name: true } } } },
             expense: {
               select: {
                 id: true,
@@ -147,6 +147,30 @@ const createFeedType = async (req, res, next) => {
       active = true,
     } = req.body;
 
+    const trimmedName = (name || "").trim();
+    if (!trimmedName) {
+      return res.status(400).json({
+        success: false,
+        message: "Feed type name is required",
+      });
+    }
+
+    // Prevent duplicate feed TYPE definitions for the same product.
+    // Repeat purchases must reuse the existing FeedType (via feedTypeId);
+    // they must not create a second FeedType with the same name.
+    const duplicate = await prisma.feedType.findFirst({
+      where: {
+        userId: req.user.id,
+        name: { equals: trimmedName, mode: "insensitive" },
+      },
+    });
+    if (duplicate) {
+      return res.status(409).json({
+        success: false,
+        message: `Feed type '${duplicate.name}' already exists. Please reuse the existing feed type for repeat purchases instead of creating a duplicate.`,
+      });
+    }
+
     const initialQty = Number(currentStock) || 0;
     const initialCost = Number(unitCost) || 0;
     const trimmedUnit = (unit || "kg").trim().toLowerCase();
@@ -170,8 +194,8 @@ const createFeedType = async (req, res, next) => {
       const feedType = await tx.feedType.create({
         data: {
           userId: req.user.id,
-          name: name.trim(),
-          category: category.trim(),
+          name: trimmedName,
+          category: (category || "FEED").trim(),
           description: description?.trim() || null,
           unit: trimmedUnit,
           bagWeightKg: parsedBagWeight,
@@ -227,6 +251,9 @@ const updateFeedType = async (req, res, next) => {
 
     const existing = await prisma.feedType.findFirst({
       where: { id, userId: req.user.id },
+      include: {
+        _count: { select: { movements: true } },
+      },
     });
 
     if (!existing) {
@@ -236,6 +263,11 @@ const updateFeedType = async (req, res, next) => {
       });
     }
 
+    // Unit/bag-weight lock: unit and bagWeightKg define the meaning of the
+    // stored stock and every historical movement. Once stock exists or any
+    // movement was recorded, silently reinterpreting them (e.g. 2,250 kg
+    // becoming 2,250 bags) would corrupt inventory, so changes are rejected.
+    // Create a new feed type for a different unit instead.
     const {
       name,
       category,
@@ -246,9 +278,57 @@ const updateFeedType = async (req, res, next) => {
       unitCost,
       active,
     } = req.body;
+    const movementCount = existing._count?.movements || 0;
+    const hasHistory = Number(existing.currentStock) !== 0 || movementCount > 0;
+    const wantsUnitChange =
+      unit !== undefined && unit.trim().toLowerCase() !== (existing.unit || "").trim().toLowerCase();
+    const wantsBagWeightChange =
+      bagWeightKg !== undefined &&
+      bagWeightKg !== null &&
+      bagWeightKg !== "" &&
+      Number(bagWeightKg) !== Number(existing.bagWeightKg);
+    if ((wantsUnitChange || wantsBagWeightChange) && hasHistory) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "The feed unit cannot be changed because this feed has existing stock or historical movements. Create a new feed type if you need a different unit.",
+      });
+    }
+
+    // Deactivation guard: hiding a feed with stock would silently remove
+    // value from inventory valuation with no recorded movement.
+    if (active !== undefined && !Boolean(active) && Number(existing.currentStock) > 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "This feed cannot be deactivated while stock remains. Use or adjust the remaining stock first.",
+      });
+    }
 
     const updateData = {};
-    if (name !== undefined) updateData.name = name.trim();
+    if (name !== undefined) {
+      const trimmedRename = (name || "").trim();
+      if (!trimmedRename) {
+        return res.status(400).json({
+          success: false,
+          message: "Feed type name is required",
+        });
+      }
+      const duplicateRename = await prisma.feedType.findFirst({
+        where: {
+          userId: req.user.id,
+          id: { not: id },
+          name: { equals: trimmedRename, mode: "insensitive" },
+        },
+      });
+      if (duplicateRename) {
+        return res.status(409).json({
+          success: false,
+          message: `Feed type '${duplicateRename.name}' already exists. Please reuse the existing feed type instead of creating a duplicate.`,
+        });
+      }
+      updateData.name = trimmedRename;
+    }
     if (category !== undefined) updateData.category = category.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (unit !== undefined) {
@@ -306,7 +386,12 @@ const updateFeedType = async (req, res, next) => {
 };
 
 /**
- * Deletes a feed type or deactivates it if historic records exist.
+ * Permanently deletes a feed type.
+ *
+ * Linked daily records and expenses keep their rows but are unlinked
+ * (their feedTypeId is set to NULL). Linked inventory movements are
+ * removed with the feed type. Callers that need history must therefore
+ * only delete feed types whose history they are willing to lose.
  */
 const deleteFeedType = async (req, res, next) => {
   try {
@@ -314,15 +399,6 @@ const deleteFeedType = async (req, res, next) => {
 
     const existing = await prisma.feedType.findFirst({
       where: { id, userId: req.user.id },
-      include: {
-        _count: {
-          select: {
-            movements: true,
-            dailyRecords: true,
-            expenses: true,
-          },
-        },
-      },
     });
 
     if (!existing) {
@@ -332,23 +408,12 @@ const deleteFeedType = async (req, res, next) => {
       });
     }
 
-    const hasReferences =
-      existing._count.dailyRecords > 0 ||
-      existing._count.expenses > 0 ||
-      existing._count.movements > 0;
-
-    if (hasReferences) {
-      // Deactivate rather than delete to preserve historical integrity
-      await prisma.feedType.update({
-        where: { id },
-        data: { active: false },
-      });
-
-      return res.json({
-        success: true,
-        message:
-          "Feed type is referenced in historical records and has been deactivated instead of permanently deleted.",
-        deactivated: true,
+    // Never let stock silently vanish: deletion removes the feed's movement
+    // history, so any remaining balance would disappear without a trace.
+    if (Number(existing.currentStock) > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete "${existing.name}" while it still holds ${Number(existing.currentStock)} ${existing.unit}. Consume the stock through daily records or record a stock adjustment to bring it to zero first.`,
       });
     }
 

@@ -14,12 +14,18 @@ const {
   deleteDailyRecord,
 } = require("../controllers/dailyRecord.controller");
 
+const {
+  createCorrection,
+  getCorrections,
+} = require("../controllers/correction.controller");
+
 const { authenticate } = require("../middleware/auth.middleware");
 const { validate, validateParams } = require("../middleware/validate");
 
 const {
   createDailyRecordSchema,
   updateDailyRecordSchema,
+  createCorrectionSchema,
   idParamSchema,
 } = require("../middleware/validation.schemas");
 
@@ -45,5 +51,15 @@ router.put(
 );
 
 router.delete("/:id", validateParams(idParamSchema), deleteDailyRecord);
+
+// Append-only corrections for immutable (out-of-window) records.
+router.post(
+  "/:id/corrections",
+  validateParams(idParamSchema),
+  validate(createCorrectionSchema),
+  createCorrection
+);
+
+router.get("/:id/corrections", validateParams(idParamSchema), getCorrections);
 
 module.exports = router;

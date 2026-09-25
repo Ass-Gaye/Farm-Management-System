@@ -34,6 +34,13 @@ function FeedTypeModal({ isOpen, onClose, onSaved, feedType = null }) {
 
   const isEditing = Boolean(feedType);
 
+  // Unit/bag-weight lock mirrors the backend rule: once stock exists or any
+  // movement was recorded, the unit defines all history and cannot change.
+  const isUnitLocked =
+    isEditing &&
+    (Number(feedType?.currentStock) !== 0 ||
+      Number(feedType?._count?.movements || 0) > 0);
+
   useEffect(() => {
     if (isOpen) {
       setFormData(getInitialFormData(feedType));
@@ -135,6 +142,7 @@ function FeedTypeModal({ isOpen, onClose, onSaved, feedType = null }) {
             <h3>{isEditing ? "Edit Feed Type" : "Add New Feed Type"}</h3>
             <p className="modal-subtitle">
               Define feed units, stock thresholds, and opening inventory.
+              Reuse one feed type per product — record repeat purchases against the same type.
             </p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
@@ -190,10 +198,15 @@ function FeedTypeModal({ isOpen, onClose, onSaved, feedType = null }) {
                 className="form-control"
                 value={formData.unit}
                 onChange={handleChange}
+                disabled={isUnitLocked}
+                title={isUnitLocked ? "Unit is locked: this feed has stock or movement history" : undefined}
               >
                 <option value="kg">Kilograms (kg)</option>
                 <option value="bags">Bags (with configurable bag weight)</option>
               </select>
+              {isUnitLocked && (
+                <span className="form-hint">Locked — this feed has stock or history. Create a new feed type for a different unit.</span>
+              )}
             </div>
 
             {formData.unit.toLowerCase().includes("bag") && (
@@ -209,6 +222,8 @@ function FeedTypeModal({ isOpen, onClose, onSaved, feedType = null }) {
                   onChange={handleChange}
                   placeholder="50"
                   min="1"
+                  disabled={isUnitLocked}
+                  title={isUnitLocked ? "Bag weight is locked: this feed has stock or movement history" : undefined}
                 />
               </div>
             )}
