@@ -389,6 +389,30 @@ const updateExpense = async (req, res, next) => {
     const effectivePaid = amountPaid !== undefined ? Math.min(Number(amountPaid), effectiveAmount) : wasFullyPaid ? effectiveAmount : Math.min(Number(existing.amountPaid || 0), effectiveAmount);
     const payState = computePaymentState(effectiveAmount, effectivePaid, paymentStatus);
 
+    // Lock feed + unit on saved purchases: a PURCHASE movement was already
+    // created from this quantity/unit/feed combination, so changing the feed
+    // or unit would silently reinterpret the recorded quantity (e.g. 50 bags
+    // becoming 50 kg). Quantity/price corrections stay allowed; to change
+    // feed or unit, delete and re-record the purchase.
+    const prevPurchaseMovement = (existing.inventoryMovements || []).find((m) => m.type === "PURCHASE");
+    if (prevPurchaseMovement) {
+      const resolvedFeedTypeIdForCheck =
+        feedTypeId !== undefined ? (feedTypeId ? Number(feedTypeId) : null) : existing.feedTypeId;
+      const resolvedUnitForCheck =
+        unit !== undefined ? (unit ? unit.trim() : null) : existing.unit;
+      const norm = (u) => (u === undefined || u === null ? null : String(u).trim().toLowerCase());
+      if (
+        resolvedFeedTypeIdForCheck !== existing.feedTypeId ||
+        norm(resolvedUnitForCheck) !== norm(existing.unit)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "The feed and unit of a recorded purchase cannot be changed because stock was already added from them. To change them, delete this purchase (if stock allows) and record a new one.",
+        });
+      }
+    }
+
     const updated = await runSerializable(
       async (tx) => {
         // 1. Revert previous purchase movement if existed.

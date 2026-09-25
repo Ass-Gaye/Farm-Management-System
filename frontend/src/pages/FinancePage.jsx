@@ -466,7 +466,7 @@ function FinancePage() {
             {/* Customer Receivables (Credit Owed to Farm) */}
             <div className="stat-card">
               <span className="stat-label" style={{ color: summary.totalCustomerOutstanding > 0 ? "#b45309" : "inherit" }}>
-                Buyer Credit Balance
+                Customers Owe
               </span>
               <strong
                 style={{
@@ -499,7 +499,7 @@ function FinancePage() {
             {/* Supplier Payables (Farm Debt Owed to Suppliers) */}
             <div className="stat-card">
               <span className="stat-label" style={{ color: summary.totalSupplierOutstanding > 0 ? "var(--alert-danger)" : "inherit" }}>
-                Supplier Payables
+                You Owe Suppliers
               </span>
               <strong
                 style={{
@@ -1622,7 +1622,7 @@ function FinancePage() {
           {filteredCustomers.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px 20px" }}>
               <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
-                No customers registered.
+                No customers yet.
               </p>
               <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
                 Create customer profiles to monitor sales, egg orders, and credit debts.
@@ -1648,7 +1648,7 @@ function FinancePage() {
                     <th>Location</th>
                     <th style={{ textAlign: "right" }}>Total Purchases</th>
                     <th style={{ textAlign: "right" }}>Amount Paid</th>
-                    <th style={{ textAlign: "right" }}>Outstanding Debt</th>
+                    <th style={{ textAlign: "right" }}>Customer Owes</th>
                     <th>Status</th>
                     <th style={{ textAlign: "right" }}>Actions</th>
                   </tr>
@@ -1778,7 +1778,7 @@ function FinancePage() {
           {filteredSuppliers.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px 20px" }}>
               <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
-                No suppliers registered.
+                No suppliers yet.
               </p>
               <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
                 Register feed mills and health suppliers to track costs and payables owed.
@@ -1804,7 +1804,7 @@ function FinancePage() {
                     <th>Contact Phone</th>
                     <th style={{ textAlign: "right" }}>Total Purchases</th>
                     <th style={{ textAlign: "right" }}>Paid Out</th>
-                    <th style={{ textAlign: "right" }}>Payables Owed</th>
+                    <th style={{ textAlign: "right" }}>You Owe Supplier</th>
                     <th>Status</th>
                     <th style={{ textAlign: "right" }}>Actions</th>
                   </tr>

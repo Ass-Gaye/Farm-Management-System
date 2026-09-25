@@ -39,6 +39,11 @@ function FinanceTransactionModal({
   const [feedTypes, setFeedTypes] = useState([]);
   const [fetchedSuppliers, setFetchedSuppliers] = useState([]);
 
+  // Feed + unit are locked on a saved purchase that already moved stock
+  // (backend enforces this too): changing them would reinterpret the
+  // recorded quantity in the new unit.
+  const isPurchaseLocked = isEditing && type === "Expense" && initialData?.feedTypeId;
+
   const suppliers = propSuppliers.length > 0 ? propSuppliers : fetchedSuppliers;
   const handleClose = onCancel || onClose;
   const handleSuccess = onSuccess || onSaved;
@@ -552,6 +557,8 @@ function FinanceTransactionModal({
                 id="tx-feedTypeId"
                 name="feedTypeId"
                 value={formData.feedTypeId}
+                disabled={isPurchaseLocked}
+                title={isPurchaseLocked ? "Feed is locked on saved purchases — delete and re-record to change it" : undefined}
                 onChange={(e) => {
                   const selId = e.target.value;
                   const selectedFeed = feedTypes.find((ft) => String(ft.id) === String(selId));
@@ -581,6 +588,11 @@ function FinanceTransactionModal({
                   </option>
                 ))}
               </select>
+              {isPurchaseLocked && (
+                <span style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4, display: "block" }}>
+                  Locked — stock was already added from this feed and unit. Delete and re-record to change them.
+                </span>
+              )}
               <span style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4, display: "block" }}>
                 Purchased quantity will automatically increase physical stock and log an audit movement.
               </span>
@@ -631,6 +643,8 @@ function FinanceTransactionModal({
                     name="unit"
                     value={formData.unit || "bags"}
                     onChange={handleChange}
+                    disabled={isPurchaseLocked}
+                    title={isPurchaseLocked ? "Unit is locked on saved purchases" : undefined}
                     style={{ width: "100%", padding: "6px 8px", fontSize: 13 }}
                   >
                     <option value="bags">bags</option>
@@ -667,8 +681,8 @@ function FinanceTransactionModal({
 
             {formData.quantity && formData.unitPrice && (
               <div style={{ marginTop: 8, fontSize: 11, color: "var(--pine-800)", fontStyle: "italic" }}>
-                Auto-calculated: {formData.quantity} {formData.unit || "units"} × {currency} {formData.unitPrice} ={" "}
-                <strong>{currency} {formData.amount}</strong>
+                Auto-calculated: {formData.quantity} {formData.unit || "units"} × {formatCurrency(formData.unitPrice, currency)} ={" "}
+                <strong>{formatCurrency(formData.amount, currency)}</strong>
               </div>
             )}
           </div>
@@ -695,7 +709,7 @@ function FinanceTransactionModal({
 
             <div className="form-group">
               <label htmlFor="tx-paid">
-                Amount Paid ({currency})
+                {type === "Income" ? "Amount Received" : "Amount Paid"} ({currency})
               </label>
               <input
                 id="tx-paid"

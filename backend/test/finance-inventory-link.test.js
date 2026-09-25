@@ -102,3 +102,67 @@ test("expense responses carry their inventory effect", async () => {
   assert.equal(deleted.body.inventory.stockBefore, 25);
   assert.equal(deleted.body.inventory.stockAfter, 0);
 });
+
+test("recorded purchase feed and unit are locked on update", async () => {
+  const login = await request("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password: "password123" }),
+  });
+  assert.equal(login.status, 200);
+  const h = { Authorization: `Bearer ${login.body.data.token}` };
+
+  const feed = await request("/api/feed-types", {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({ name: "Lock Bags", unit: "bags", bagWeightKg: 50, currentStock: 0 }),
+  });
+  assert.equal(feed.status, 201);
+  const other = await request("/api/feed-types", {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({ name: "Lock Other", unit: "kg", currentStock: 0 }),
+  });
+  assert.equal(other.status, 201);
+
+  const purchase = await request("/api/expenses", {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({
+      feedTypeId: feed.body.data.id, category: "Feed", quantity: 2, unit: "bags",
+      unitPrice: 1000, date: new Date().toISOString(),
+    }),
+  });
+  assert.equal(purchase.status, 201);
+  const purchaseId = purchase.body.data.id;
+
+  // Unit reinterpretation rejected, stock and expense unchanged.
+  const unitChange = await request(`/api/expenses/${purchaseId}`, {
+    method: "PUT",
+    headers: h,
+    body: JSON.stringify({ category: "Feed", quantity: 2, unit: "kg", unitPrice: 1000, amount: 2000, date: new Date().toISOString() }),
+  });
+  assert.equal(unitChange.status, 400);
+  assert.ok(unitChange.body.message.toLowerCase().includes("cannot be changed"));
+  const feedAfter = await request(`/api/feed-types/${feed.body.data.id}`, { headers: h });
+  assert.equal(feedAfter.body.data.currentStock, 2);
+  const expAfter = await request(`/api/expenses/${purchaseId}`, { headers: h });
+  assert.equal(expAfter.body.data.unit, "bags");
+
+  // Feed switch rejected as well.
+  const feedChange = await request(`/api/expenses/${purchaseId}`, {
+    method: "PUT",
+    headers: h,
+    body: JSON.stringify({ category: "Feed", feedTypeId: other.body.data.id, quantity: 2, unit: "bags", unitPrice: 1000, amount: 2000, date: new Date().toISOString() }),
+  });
+  assert.equal(feedChange.status, 400);
+
+  // Quantity-only correction still allowed: 2 -> 3 bags.
+  const qtyFix = await request(`/api/expenses/${purchaseId}`, {
+    method: "PUT",
+    headers: h,
+    body: JSON.stringify({ category: "Feed", quantity: 3, unit: "bags", unitPrice: 1000, amount: 3000, date: new Date().toISOString() }),
+  });
+  assert.equal(qtyFix.status, 200);
+  const feedFinal = await request(`/api/feed-types/${feed.body.data.id}`, { headers: h });
+  assert.equal(feedFinal.body.data.currentStock, 3);
+});

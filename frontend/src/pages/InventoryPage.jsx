@@ -115,6 +115,19 @@ function InventoryPage() {
     return feedTypes.filter((ft) => ft.isLowStock && ft.active);
   }, [feedTypes]);
 
+  // Most recent feed purchase per feed type, from already-loaded activity.
+  const lastPurchaseByFeed = useMemo(() => {
+    const latest = {};
+    for (const m of movements) {
+      if (m.type !== "PURCHASE") continue;
+      const current = latest[m.feedTypeId];
+      if (!current || new Date(m.date) > new Date(current.date)) {
+        latest[m.feedTypeId] = m;
+      }
+    }
+    return latest;
+  }, [movements]);
+
   // Filtered movements
   const filteredMovements = useMemo(() => {
     return movements.filter((m) => {
@@ -131,23 +144,6 @@ function InventoryPage() {
     });
   }, [movements, movementTypeFilter, movementFeedFilter]);
 
-  const getMovementBadge = (type) => {
-    switch (type) {
-      case "PURCHASE":
-        return <span className="badge badge-success">PURCHASE</span>;
-      case "CONSUMPTION":
-        return <span className="badge badge-primary">CONSUMPTION</span>;
-      case "ADJUSTMENT":
-        return <span className="badge badge-warning">ADJUSTMENT</span>;
-      case "WASTAGE":
-        return <span className="badge badge-danger">WASTAGE</span>;
-      case "RETURN":
-        return <span className="badge badge-secondary">RETURN</span>;
-      default:
-        return <span className="badge">{type}</span>;
-    }
-  };
-
   // Human-readable labels for movement types. The underlying enum/database
   // values are unchanged; this is presentation only.
   const getMovementLabel = (type) => {
@@ -155,13 +151,13 @@ function InventoryPage() {
       case "PURCHASE":
         return "🛒 Feed Purchase";
       case "CONSUMPTION":
-        return "🐔 Daily Consumption";
+        return "🐔 Feed Used";
       case "ADJUSTMENT":
         return "↕ Stock Adjustment";
       case "WASTAGE":
         return "⚠ Wastage";
       case "RETURN":
-        return "↩ Return";
+        return "↩ Supplier Return";
       default:
         return type;
     }
@@ -311,7 +307,7 @@ function InventoryPage() {
           onClick={() => setActiveTab("movements")}
         >
           <InventoryIcon size={16} />
-          Movement History ({movements.length})
+          Stock Activity ({movements.length})
         </button>
         <button
           type="button"
@@ -359,11 +355,11 @@ function InventoryPage() {
           {filteredFeedTypes.length === 0 ? (
             <EmptyState
               icon={<FeedIcon size={40} />}
-              title="No feed types found"
+              title="No feed inventory yet"
               message={
                 stockSearch
                   ? "No feed types matched your search criteria."
-                  : "Start by adding your first feed variety (e.g. Layer Feed, Broiler Starter)."
+                  : "Add your first feed type or record a feed purchase."
               }
               actionLabel={!stockSearch ? "+ Add Feed Type" : null}
               onAction={handleOpenAddFeed}
@@ -406,6 +402,11 @@ function InventoryPage() {
                           <div className="text-muted text-xs">
                             ≈ {(Number(ft.currentStock) * Number(ft.bagWeightKg)).toLocaleString()} kg
                             <span> (1 bag = {Number(ft.bagWeightKg)} kg)</span>
+                          </div>
+                        )}
+                        {lastPurchaseByFeed[ft.id] && (
+                          <div className="text-muted text-xs" style={{ marginTop: 2 }}>
+                            Last purchase: +{Number(lastPurchaseByFeed[ft.id].quantity).toLocaleString()} {lastPurchaseByFeed[ft.id].unit} on {new Date(lastPurchaseByFeed[ft.id].date).toLocaleDateString()}
                           </div>
                         )}
                       </td>
@@ -462,11 +463,11 @@ function InventoryPage() {
         </div>
       )}
 
-      {/* TAB 2: Movement History */}
+      {/* TAB 2: Stock Activity */}
       {activeTab === "movements" && (
         <div className="card">
           <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
-            <h3 style={{ margin: 0 }}>Inventory Audit Log</h3>
+            <h3 style={{ margin: 0 }}>Stock Activity</h3>
             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
               <select
                 className="form-control"
@@ -530,7 +531,6 @@ function InventoryPage() {
                         </td>
                         <td>
                           <div style={{ fontWeight: 600, fontSize: 13 }}>{getMovementLabel(m.type)}</div>
-                          <div style={{ marginTop: 2 }}>{getMovementBadge(m.type)}</div>
                         </td>
                         <td>
                           <span
