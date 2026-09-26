@@ -1,384 +1,479 @@
-# Farm Management System
+# 🐔 Poultry Farm Management System
 
-A production-grade poultry farm management platform featuring a React 19 + Vite dashboard and an Express REST API backed by PostgreSQL and Prisma ORM.
+A production-grade, multi-tenant poultry farm management platform built with **React 19**, **Node.js / Express 5**, **Prisma ORM**, and **PostgreSQL**.
 
-## Project Status
-
-The platform features multi-user isolation with JWT authentication, user-specific poultry houses, breed cataloging, flock health condition tracking, harvest & slaughter date planning, daily production records, and live dashboard analytics.
-
-## Key Features
-
-### 1. User Authentication & Data Isolation
-- **JWT-based Security:** User registration, login, and `/me` endpoints using JSON Web Tokens and bcrypt password hashing.
-- **Tenant Isolation:** Every poultry house, breed, daily record, health check, and slaughter plan is strictly scoped to the authenticated user on the database query level. Users cannot access, edit, or delete another user's data.
-
-### 2. Poultry House Management
-- Create, view, edit, and delete poultry houses.
-- House selection dropdown filtered exclusively to the authenticated user.
-- Cascade deletion: Deleting a house safely removes all associated daily records, breeds, health inspections, and slaughter plans.
-
-### 3. Bird Breed Management
-- Record multiple breeds kept within each poultry house (e.g., Cobb 500, Ross 308, Lohmann Brown).
-- Track breed name, flock count, date added, and notes/purpose.
-- Input validation ensuring positive bird counts and required breed names.
-- Breeds summary displayed on the dashboard with total cataloged birds.
-
-### 4. Flock Condition & Health Tracking
-- Record clinical condition of birds: healthy, sick, weak, and under observation.
-- Scope condition checks to a specific breed or across the whole house flock.
-- Strict validation ensuring condition counts are non-negative whole numbers and cannot exceed available flock capacity.
-- Real-time health metrics banner and inspection log table.
-
-### 5. Expected Slaughter Date & Harvest Planning
-- Schedule harvest batches with placement date, expected slaughter date, bird quantity, and market notes.
-- Strict date validation ensuring expected slaughter date cannot be earlier than placement date.
-- Quantity validation ensuring slaughter birds do not exceed available birds for the selected breed or house.
-- Dynamic status calculation relative to the current date:
-  - **Overdue:** Expected slaughter date is in the past.
-  - **Due today:** Expected slaughter date is today.
-  - **Due soon:** Expected slaughter date is within 7 days.
-  - **Upcoming:** Expected slaughter date is more than 7 days away.
-  - **Completed:** Marked completed by the user.
-- One-click harvest completion toggle (`✓ Mark Completed` / `↺ Mark Pending`).
-- Prominent harvest warning banner on the dashboard alerting managers of urgent or overdue slaughter batches.
-
-### 6. Daily Production Records
-- Daily tracking of mortality, feed consumed in kilograms, and eggs collected.
-- Enforces unique date per house (no duplicate records for the same day).
-- Enforces mortality limit: Cumulative mortality cannot exceed birds placed.
-
-### 7. Interactive Farm Dashboard & Clean UI
-- Live summary cards: Current Birds, Flock Loss %, Feed Consumed (kg), Eggs Collected, and Cataloged Breeds.
-- Tabbed workspace:
-  - 📅 **Daily Records**
-  - 🐓 **Bird Breeds**
-  - 🩺 **Health & Condition**
-  - 🔪 **Slaughter Planning**
-- User profile badge with 1-click Demo Farm Account login option.
-- Reusable confirmation dialogs protecting destructive actions.
-- Responsive design for desktop, tablet, and mobile devices.
+The system coordinates bird inventory, daily production records, feed stock conversions, customer receivables, supplier payables, harvest planning, and health protocols within strict database serializable transactions.
 
 ---
 
-## Architecture
+## 📑 Table of Contents
 
-```text
-.
-|-- backend/
-|   |-- prisma/
-|   |   |-- migrations/
-|   |   |   `-- 20260916225500_add_users_breeds_health_slaughter/
-|   |   `-- schema.prisma
-|   |-- src/
-|   |   |-- controllers/
-|   |   |   |-- auth.controller.js
-|   |   |   |-- birdCondition.controller.js
-|   |   |   |-- breed.controller.js
-|   |   |   |-- dailyRecord.controller.js
-|   |   |   |-- dashboard.controller.js
-|   |   |   |-- house.controller.js
-|   |   |   `-- slaughterPlan.controller.js
-|   |   |-- lib/prisma.js
-|   |   |-- middleware/
-|   |   |   |-- auth.middleware.js
-|   |   |   |-- validate.js
-|   |   |   `-- validation.schemas.js
-|   |   |-- routes/
-|   |   |   |-- auth.routes.js
-|   |   |   |-- birdCondition.routes.js
-|   |   |   |-- breed.routes.js
-|   |   |   |-- dailyRecord.routes.js
-|   |   |   |-- dashboard.routes.js
-|   |   |   |-- house.routes.js
-|   |   |   `-- slaughterPlan.routes.js
-|   |   |-- services/
-|   |   |   `-- dashboard.service.js
-|   |   `-- server.js
-|   `-- test/
-|       `-- api.test.js
-|-- frontend/
-|   |-- src/
-|   |   |-- components/
-|   |   |   |-- AuthModal.jsx
-|   |   |   |-- BirdConditionForm.jsx
-|   |   |   |-- BreedForm.jsx
-|   |   |   |-- ConfirmDialog.jsx
-|   |   |   |-- DailyRecordEditForm.jsx
-|   |   |   |-- DailyRecordForm.jsx
-|   |   |   |-- HouseEditForm.jsx
-|   |   |   |-- HouseForm.jsx
-|   |   |   `-- SlaughterPlanForm.jsx
-|   |   |-- services/
-|   |   |   `-- api.js
-|   |   |-- App.css
-|   |   |-- App.jsx
-|   |   `-- main.jsx
-|   `-- package.json
-|-- docs/
-|-- CONTRIBUTING.md
-`-- README.md
+- [🌾 Plain-English Guide for Farm Owners & Managers (Non-Technical)](#-plain-english-guide-for-farm-owners--managers-non-technical)
+  - [The Big Picture](#the-big-picture)
+  - [Daily Farm Routine: How to Use the App](#daily-farm-routine-how-to-use-the-app)
+  - [Keeping Track of Your Birds](#keeping-track-of-your-birds)
+  - [What Happens if You Make a Mistake? (The 7-Day Rule)](#what-happens-if-you-make-a-mistake-the-7-day-rule)
+  - [Feed Stock & Inventory Management](#feed-stock--inventory-management)
+  - [Managing Money, Customer Credit & Supplier Debt](#managing-money-customer-credit--supplier-debt)
+  - [Planning Harvests & Depopulation](#planning-harvests--depopulation)
+  - [Vaccinations & Flock Health](#vaccinations--flock-health)
+- [🏗️ Technical Architecture](#️-technical-architecture)
+- [🗄️ Database Schema & Data Models](#️-database-schema--data-models)
+- [🔐 Authentication & Multi-Tenancy](#-authentication--multi-tenancy)
+- [⚙️ Core Technical Workflows](#️-core-technical-workflows)
+  - [Bird Accounting Formula](#bird-accounting-formula)
+  - [Daily Production & 7-Day Immutability Window](#daily-production--7-day-immutability-window)
+  - [Feed Inventory & Unit Conversions](#feed-inventory--unit-conversions)
+  - [Financial Transactions & Debt Tracking](#financial-transactions--debt-tracking)
+  - [Slaughter Planning & Depopulation Sync](#slaughter-planning--depopulation-sync)
+- [📡 API Reference](#-api-reference)
+- [🚀 Setup & Installation](#-setup--installation)
+- [🧪 Testing & Quality Assurance](#-testing--quality-assurance)
+
+---
+
+## 🌾 Plain-English Guide for Farm Owners & Managers (Non-Technical)
+
+### The Big Picture
+Managing a poultry farm requires juggling birds, feed, medicines, sales, and expenses every day. A single mistake—like forgetting feed consumption, miscounting dead birds, or losing track of customer credit—can silently eat away your profits.
+
+This application acts as your **digital farm manager**. It connects every part of your farm so that:
+- When birds eat feed, your **feed stock automatically drops**.
+- When birds die or are sold, your **live bird count updates immediately**.
+- When you sell eggs or birds on credit, the app tracks **who owes you money**.
+- When you buy feed or chicks without paying upfront, the app tracks **who you owe money to**.
+- When your feed stock gets dangerously low, the app **alerts you before you run out**.
+
+```
+[ Buy Feed / Chicks ]  ──►  Stock & Debt Recorded
+         │
+         ▼
+[ Daily Routine ]      ──►  Feed Used, Deaths Logged, Eggs Collected
+         │
+         ▼
+[ Sell Eggs / Birds ]  ──►  Revenue In, Credit Tracked, Birds Decremented
+         │
+         ▼
+[ Farm Dashboard ]     ──►  Real-time Profit, Mortality %, and Feed Levels
 ```
 
 ---
 
-## Requirements
+### Daily Farm Routine: How to Use the App
 
-- **Node.js:** 18.x or newer (Node 20+ recommended)
-- **npm:** 9.x or newer
-- **PostgreSQL:** 13 or newer (or cloud Postgres such as Neon / Supabase)
+#### 1. Morning Check-in & House Setup
+- **Houses**: Create a digital representation of your sheds (e.g., "House 1", "Broiler Shed A").
+- **Flocks**: Whenever a new batch of chicks arrives from the hatchery, enter the flock name, breed, arrival date, and how many birds were placed (e.g., 5,000 birds).
+
+#### 2. Logging Daily Production (End of Each Day)
+At the end of each day, open **Daily Records** and enter three key numbers:
+1. **Mortality**: How many birds died today?
+2. **Feed Consumed**: How many bags or kilograms of feed did the birds eat today?
+3. **Eggs Collected**: (For layers) How many total eggs were collected, and how many were broken/damaged?
+
+**What the app does automatically in the background:**
+- Deducts the mortality from your active live bird count.
+- Deducts the feed eaten from your feed inventory warehouse.
+- Calculates your flock's laying percentage and mortality rate.
+- Prevents double-entry (you cannot accidentally enter two records for the same house on the same date).
 
 ---
 
-## Setup & Installation
+### Keeping Track of Your Birds
+The app maintains a 100% accurate count of live birds using a simple rule:
+$$\text{Live Birds Today} = \text{Initial Birds Placed} - \text{Total Deaths} - \text{Total Birds Sold/Harvested}$$
 
-### 1. Clone Repository & Install Dependencies
+You can never accidentally record more deaths or sales than the birds you actually have alive. The system protects you from negative bird counts.
 
+---
+
+### What Happens if You Make a Mistake? (The 7-Day Rule)
+
+Farmers are busy, and recounting happens. The app has a smart safety policy for editing historical records:
+
+- **Within 7 Days of Logging**:
+  If you notice a typo within 7 days, you can directly edit the record. The app will automatically recalculate the feed stock and flock count for you.
+- **After 7 Days (Locked for Audit)**:
+  To prevent tampering, tax discrepancies, or bookkeeping confusion, records older than 7 days **cannot be directly edited or deleted**. Instead, you use the **"Submit Correction"** button to log an official adjustment (e.g., `+3 mortality` or `-50 eggs`) with a written reason. Your history stays clean, honest, and auditable.
+
+---
+
+### Feed Stock & Inventory Management
+
+Running out of feed can stall bird growth or stop egg production. The app manages feed like a warehouse:
+1. **Choose Your Unit**: Track feed in **Kilograms (kg)** or **Bags** (e.g., 50 kg bags). The app converts between them automatically.
+2. **Buy Feed**: When feed arrives, record a purchase. Your stock increases instantly.
+3. **Daily Feeding**: As workers log daily records, feed is deducted from stock.
+4. **Low Stock Warnings**: If feed drops below your minimum safety limit (e.g., 20 bags), a warning banner appears on your dashboard so you reorder in time.
+5. **Damaged / Spilled Feed**: Log wastage or returns with a single click to keep digital stock matching physical bags in your shed.
+
+---
+
+### Managing Money, Customer Credit & Supplier Debt
+
+#### Selling Products (Eggs, Meat, Live Birds, Manure)
+- When a customer buys from you, record an **Income** entry.
+- If the customer pays in full: marked as **PAID**.
+- If the customer pays part or nothing: marked as **PARTIALLY PAID** or **UNPAID**.
+- The unpaid balance is automatically added to that **Customer's Account**. You can see exactly how much every buyer owes your farm.
+- When they pay you later, open **Settle Payment** to record the cash, and their debt decreases.
+
+#### Buying Supplies (Chicks, Feed, Medicines, Bedding)
+- When you purchase from a vendor, record an **Expense** entry.
+- Any unpaid amount goes straight to your **Supplier Debt Balance**.
+- You can never accidentally delete a customer or supplier who still owes you money or whom you still owe.
+
+---
+
+### Planning Harvests & Depopulation
+
+For broiler farmers, timing the market is everything:
+1. **Slaughter Scheduling**: Set a target harvest date (e.g., Day 42) and target weight (e.g., 2.2 kg).
+2. **Urgency Status**: The system highlights batches as `Upcoming`, `Due Soon`, `Due Today`, or `Overdue`.
+3. **One-Click Completion**: When harvest day arrives, click **Mark Completed**. The app automatically records the depopulation event and removes those birds from your active shed.
+
+---
+
+### Vaccinations & Flock Health
+- Use standard vaccination schedules for **Broilers** (e.g., Gumboro, Newcastle) or **Layers**.
+- Track upcoming dates on the dashboard.
+- Marking a vaccination as completed automatically logs the medication expense into your farm finances.
+
+---
+
+## 🏗️ Technical Architecture
+
+The application is structured as a decoupled Client-Server system:
+
+```
+[ User Browser ]
+       │
+       ▼
+[ React 19 SPA (Vite) ]
+  ├── Routing: React Router v7 (Public & Protected routes)
+  ├── State: FarmContext (User, selected house, active flocks, dashboard cache)
+  └── HTTP Client: api.js (Fetch API with Bearer JWT interceptor)
+       │
+       ▼  (REST JSON over /api/*)
+[ Express 5 API Server (Node.js) ]
+  ├── Security: Helmet, CORS Whitelisting, Express Rate Limiter
+  ├── Authentication: auth.middleware.js (JWT verify + DB User lookup)
+  ├── Validation: validate.js (Zod schemas via validation.schemas.js)
+  ├── Controllers & Services: Business logic orchestration
+  ├── Transactions: runSerializable() with retry on P2034 serialization conflicts
+  └── ORM: Prisma Client
+       │
+       ▼  (SQL via Connection Pool)
+[ PostgreSQL Database ]
+```
+
+### Key Technical Properties
+- **Strict Multi-Tenancy**: All records are scoped by `userId` directly or through `PoultryHouse`. Cross-tenant data leakage is prevented at the database query level.
+- **Serializable Transactions**: High-concurrency operations (daily logs, depopulations, feed adjustments) run under PostgreSQL `Serializable` isolation with 3 automatic retries.
+- **Stateless HMAC Password Reset**: Password reset tokens are signed JWTs using a secret composite of `JWT_SECRET + user.passwordHash`. Changing the password immediately invalidates all active reset tokens without database state.
+
+---
+
+## 🗄️ Database Schema & Data Models
+
+Defined in [schema.prisma](file:///C:/Users/assga/poultry-management/backend/prisma/schema.prisma):
+
+```mermaid
+erDiagram
+    User ||--o{ PoultryHouse : "owns"
+    User ||--o{ FeedType : "defines"
+    User ||--o{ Customer : "manages"
+    User ||--o{ Supplier : "manages"
+    User ||--o{ Income : "earns"
+    User ||--o{ Expense : "spends"
+    User ||--o{ InventoryMovement : "audits"
+
+    PoultryHouse ||--o{ Flock : "houses"
+    PoultryHouse ||--o{ DailyRecord : "logs"
+    PoultryHouse ||--o{ Vaccination : "schedules"
+
+    Flock ||--o{ DailyRecord : "accumulates"
+    Flock ||--o{ DepopulationEvent : "depopulates"
+    Flock ||--o{ SlaughterPlan : "targets"
+    Flock ||--o{ Vaccination : "receives"
+    Breed ||--o{ Flock : "classifies"
+
+    DailyRecord ||--o{ DailyRecordCorrection : "adjusted by"
+    FeedType ||--o{ InventoryMovement : "records"
+    FeedType ||--o{ DailyRecord : "consumed in"
+    FeedType ||--o{ Expense : "purchased via"
+
+    Customer ||--o{ Income : "owes / pays"
+    Supplier ||--o{ Expense : "billed by"
+```
+
+### Models Overview
+
+| Model | Purpose | Key Attributes | Cascade Delete Behavior |
+| :--- | :--- | :--- | :--- |
+| **User** | Farm account owner | `id`, `email`, `passwordHash`, `name` | Cascades all owned houses, feeds, finances |
+| **PoultryHouse** | Shed / barn facility | `name`, `capacity`, `houseType`, `userId` | Cascades flocks, daily records, vaccinations |
+| **Flock** | Placed bird batch | `flockNumber`, `initialCount`, `currentBirds`, `status` | Cascades depopulations, daily records |
+| **DailyRecord** | Daily operational log | `date`, `mortality`, `feedKg`, `eggsCollected` | Cascades corrections; `feedTypeId` SetNull |
+| **DailyRecordCorrection**| Post-7-day audit adjustment | `delta`, `correctionType`, `reason`, `userId` | Cascades on daily record deletion |
+| **DepopulationEvent** | Bird removal record | `count`, `reason` (SOLD, SLAUGHTERED, etc.) | Cascades on flock deletion |
+| **FeedType** | Feed inventory catalog | `name`, `unit`, `bagWeightKg`, `currentStock` | Blocked if `currentStock > 0` |
+| **InventoryMovement** | Feed balance ledger | `type`, `quantity`, `quantityKg`, `balanceAfter` | Cascades on feed type deletion |
+| **Customer** | Produce buyer | `name`, `phone`, `balance` (receivables) | Blocked if `balance > 0` |
+| **Supplier** | Supply vendor | `name`, `phone`, `balance` (payables) | Blocked if `balance > 0` |
+| **Income** | Revenue transaction | `amount`, `amountPaid`, `amountDue`, `paymentStatus` | Reverts customer balance on delete |
+| **Expense** | Cost transaction | `amount`, `amountPaid`, `amountDue`, `category` | Reverts supplier balance on delete |
+| **SlaughterPlan** | Meat harvest target | `targetDate`, `targetWeightKg`, `targetBirds` | Cascades on flock deletion |
+| **Vaccination** | Medication schedule | `name`, `targetDate`, `status`, `cost` | Cascades on house deletion |
+| **Breed** | Reference bird breed | `name`, `birdType`, `standardGrowthRate` | Flocks set `breedId` to `NULL` on delete |
+| **BirdCondition** | Health status reference | `name`, `severity` (NORMAL, MILD, SEVERE) | Records set `conditionId` to `NULL` |
+
+---
+
+## 🔐 Authentication & Multi-Tenancy
+
+- **Password Hashing**: Passwords are hashed with `bcryptjs` (10 rounds).
+- **JWT Authentication**: Tokens are signed with `HS256` and valid for 7 days.
+- **Protected Endpoints**: Require `Authorization: Bearer <token>`. The middleware attaches the authenticated tenant to `req.user`.
+- **Query Scoping**: Every query filters by `userId: req.user.id` or joins through an owned `PoultryHouse`.
+- **Stateless Password Reset**:
+  1. `POST /api/auth/forgot-password` generates a JWT signed with `${JWT_SECRET}-${user.passwordHash}` (1-hour expiry).
+  2. The email contains a link to `/reset-password?token=...&id=...`.
+  3. `POST /api/auth/reset-password` verifies the signature using the user's current password hash.
+  4. Updating the password changes the hash, instantly invalidating the token.
+
+---
+
+## ⚙️ Core Technical Workflows
+
+### Bird Accounting Formula
+At any point in time, live birds in an active flock are computed as:
+$$\text{Current Live Birds} = \text{Flock.initialCount} - \sum (\text{Mortality} + \text{Mortality Corrections}) - \sum \text{Depopulation Counts}$$
+This invariant is enforced within serializable transactions during daily record creation, post-7-day corrections, and depopulation logging.
+
+---
+
+### Daily Production & 7-Day Immutability Window
+
+```
+User submits Daily Record
+           │
+           ▼
+[ < 7 Days Old ]  ──►  Direct PUT / DELETE allowed.
+                       - Old feed reversed in inventory.
+                       - New feed deducted.
+                       - Flock currentBirds delta adjusted.
+           │
+           ▼
+[ >= 7 Days Old ] ──►  Direct PUT / DELETE rejected (403 RECORD_IMMUTABLE).
+                       - Must call POST /api/daily-records/:id/corrections.
+                       - Creates append-only DailyRecordCorrection row.
+                       - Adjusts Flock.currentBirds by delta.
+                       - Preserves historical audit integrity.
+```
+
+---
+
+### Feed Inventory & Unit Conversions
+
+- Feed stock is maintained on the `FeedType` model in its designated unit (`KG` or `BAG`).
+- Conversion formula:
+  $$\text{Bags} = \frac{\text{Kg}}{\text{bagWeightKg}}, \quad \text{Kg} = \text{Bags} \times \text{bagWeightKg}$$
+- **Negative Stock Guard**: A transaction aborts with `INSUFFICIENT_STOCK` (400) if a deduction exceeds `currentStock`.
+- **Automatic Purchases**: Creating an `Expense` with category `FEED` automatically generates an `InventoryMovement` of type `PURCHASE` and increases stock.
+- **Audit Ledger**: Every change appends an immutable `InventoryMovement` row storing `balanceAfter`.
+
+---
+
+### Financial Transactions & Debt Tracking
+
+- **Receivables (Customer Credit)**:
+  $$\text{Customer.balance} = \sum \text{Income.amountDue}$$
+- **Payables (Supplier Debt)**:
+  $$\text{Supplier.balance} = \sum \text{Expense.amountDue}$$
+- **Payment Settlement**:
+  Updating an income or expense via `PaymentModal` increments `amountPaid`, decrements `amountDue`, re-evaluates `paymentStatus` (`PAID`, `PARTIALLY_PAID`, `UNPAID`), and decreases the entity balance.
+- **Deletion Safeguard**: Deleting customers or suppliers with `balance > 0` is rejected with `DEBT_OUTSTANDING` (400).
+
+---
+
+### Slaughter Planning & Depopulation Sync
+
+- When a `SlaughterPlan` is toggled to `COMPLETED`:
+  1. A `DepopulationEvent` is automatically created with reason `SLAUGHTERED` and bird count equal to `actualBirds`.
+  2. `Flock.currentBirds` is decremented atomically.
+- If toggled back to `PENDING`:
+  1. The linked `DepopulationEvent` is deleted.
+  2. Bird count is restored to the flock.
+
+---
+
+## 📡 API Reference
+
+All protected endpoints require `Authorization: Bearer <token>`.
+
+### Authentication (`/api/auth`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/auth/register` | Register new user account |
+| `POST` | `/api/auth/login` | Login and receive 7-day JWT |
+| `GET` | `/api/auth/me` | Fetch authenticated user profile |
+| `POST` | `/api/auth/forgot-password` | Send password reset email |
+| `POST` | `/api/auth/reset-password` | Reset password using HMAC token |
+
+### Houses & Dashboard (`/api/houses`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/houses` | List user's poultry houses |
+| `POST` | `/api/houses` | Create a new poultry house |
+| `GET` | `/api/houses/:id` | Get house details and records |
+| `PUT` | `/api/houses/:id` | Update house name / capacity |
+| `DELETE` | `/api/houses/:id` | Delete house (cascades related data) |
+| `GET` | `/api/houses/:id/dashboard` | Aggregated metrics (birds, feed, cash flow) |
+
+### Flocks (`/api/flocks`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/flocks?houseId=:id` | List flocks for a house |
+| `POST` | `/api/flocks` | Onboard a new flock batch |
+| `GET` | `/api/flocks/:id` | Get flock details and history |
+| `PATCH` | `/api/flocks/:id/status` | Update flock status (ACTIVE, DEPLETED, ARCHIVED) |
+
+### Daily Records & Corrections (`/api/daily-records`, `/api/houses/:houseId/daily-records`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/daily-records?houseId=:id` | List daily records |
+| `POST` | `/api/houses/:houseId/daily-records`| Log daily mortality, feed, and eggs |
+| `PUT` | `/api/daily-records/:id` | Update record (within 7-day window) |
+| `DELETE` | `/api/daily-records/:id` | Delete record & revert feed (within 7 days) |
+| `POST` | `/api/daily-records/:id/corrections`| Append-only correction for locked records |
+
+### Inventory & Feed (`/api/inventory`, `/api/feed-types`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/feed-types` | List registered feed formulations |
+| `POST` | `/api/feed-types` | Create feed type (unit, bag weight, reorder level) |
+| `GET` | `/api/inventory` | Real-time stock levels & low stock alerts |
+| `POST` | `/api/inventory/adjust` | Log manual stock adjustment, wastage, or return |
+| `GET` | `/api/inventory/movements`| Full audit ledger of stock movements |
+
+### Finance, Customers & Suppliers (`/api/finance`, `/api/customers`, `/api/suppliers`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/finance/summary` | Cash flow, money in/out, payables, receivables |
+| `POST` | `/api/finance/income` | Record product sale (optional customer credit) |
+| `POST` | `/api/finance/expense` | Record farm expense (auto feed stock if FEED) |
+| `PUT` | `/api/finance/income/:id` | Settle customer payment |
+| `PUT` | `/api/finance/expense/:id`| Settle supplier payment |
+| `GET` | `/api/customers` | Customer directory with outstanding balances |
+| `GET` | `/api/suppliers` | Supplier directory with outstanding debts |
+
+### Slaughter & Depopulation (`/api/slaughter-plans`, `/api/depopulations`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/slaughter-plans` | List harvest schedules with status chips |
+| `POST` | `/api/slaughter-plans` | Schedule slaughter target date and weight |
+| `PATCH` | `/api/slaughter-plans/:id/status`| Mark completed (auto-creates depopulation) |
+| `POST` | `/api/depopulations` | Record bird removal (SOLD, CULLED, SLAUGHTERED) |
+
+### Vaccinations (`/api/vaccinations`)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/vaccinations?houseId=:id`| List scheduled and completed treatments |
+| `POST` | `/api/vaccinations` | Schedule single vaccination |
+| `POST` | `/api/vaccinations/template`| Auto-generate broiler or layer schedule |
+| `PATCH` | `/api/vaccinations/:id/complete`| Mark completed and log expense |
+
+---
+
+## 🚀 Setup & Installation
+
+### Prerequisites
+- **Node.js**: v18.x or v20+
+- **npm**: v9.x or newer
+- **PostgreSQL**: v13+ (Local or cloud instance like Neon / Supabase)
+
+### 1. Clone & Install Dependencies
 ```bash
 git clone https://github.com/Ass-Gaye/Farm-Management-System.git
 cd Farm-Management-System
 
-# Install backend dependencies
+# Install backend packages
 cd backend
 npm install
 
-# Install frontend dependencies
+# Install frontend packages
 cd ../frontend
 npm install
 ```
 
 ### 2. Configure Environment Variables
 
-In `backend/.env`:
+Create `backend/.env`:
 ```env
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public"
-DIRECT_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
-JWT_SECRET="your-super-secret-jwt-key"
+DATABASE_URL="postgresql://postgres:password@localhost:5432/poultry_db?schema=public"
+JWT_SECRET="your-super-strong-jwt-secret-key"
 JWT_EXPIRES_IN="7d"
 PORT=5000
 NODE_ENV=development
-CORS_ORIGIN=http://localhost:5173
+CORS_ORIGIN="http://localhost:5173"
+
+# Optional Email Service for Password Resets (Resend or SMTP)
+RESEND_API_KEY=""
+SMTP_HOST=""
+SMTP_PORT=587
+SMTP_USER=""
+SMTP_PASS=""
+EMAIL_FROM="noreply@yourfarm.com"
 ```
 
-In `frontend/.env` (optional, defaults to `http://localhost:5000/api`):
+Create `frontend/.env` (optional, defaults to `http://localhost:5000/api`):
 ```env
-VITE_API_URL=http://localhost:5000/api
+VITE_API_URL="http://localhost:5000/api"
 ```
 
-### 3. Apply Database Migrations
-
-Run Prisma migrations to create all tables and relationships:
-
+### 3. Run Database Migrations
 ```bash
 cd backend
 npx prisma migrate dev
 npx prisma generate
 ```
 
-For production deployment:
-```bash
-npx prisma migrate deploy
-```
+### 4. Start Development Servers
 
----
-
-## Running the Application
-
-### Start the Backend API
-
+Start Backend:
 ```bash
 cd backend
 npm run dev
+# Server running at http://localhost:5000
 ```
-The API server runs at `http://localhost:5000`.
 
-### Start the Frontend Client
-
+Start Frontend:
 ```bash
 cd frontend
 npm run dev
-```
-The Vite development server runs at `http://localhost:5173`.
-
----
-
-## API Reference
-
-All protected endpoints require an `Authorization: Bearer <token>` header. All responses return a standard JSON structure: `{ "success": boolean, "data"?: any, "message"?: string }`.
-
-### Authentication (`/api/auth`)
-| Method | Endpoint | Description | Auth Required |
-|---|---|---|---|
-| `POST` | `/api/auth/register` | Register a new farm manager | No |
-| `POST` | `/api/auth/login` | Authenticate and obtain JWT token | No |
-| `GET` | `/api/auth/me` | Fetch authenticated user profile | Yes |
-
-### Poultry Houses (`/api/houses`)
-| Method | Endpoint | Description | Auth Required |
-|---|---|---|---|
-| `GET` | `/api/houses` | List houses owned by authenticated user | Yes |
-| `POST` | `/api/houses` | Create a new poultry house | Yes |
-| `GET` | `/api/houses/:id` | Get house details and records | Yes |
-| `PUT` | `/api/houses/:id` | Update poultry house details | Yes |
-| `DELETE` | `/api/houses/:id` | Delete poultry house (cascades related data) | Yes |
-| `GET` | `/api/houses/:id/dashboard` | Aggregated dashboard stats for the house | Yes |
-
-### Bird Breeds (`/api/breeds`)
-| Method | Endpoint | Description | Auth Required |
-|---|---|---|---|
-| `GET` | `/api/breeds?houseId=:id` | List breeds for a poultry house | Yes |
-| `POST` | `/api/breeds` | Add a new breed to a poultry house | Yes |
-| `GET` | `/api/breeds/:id` | Get breed details and history | Yes |
-| `PUT` | `/api/breeds/:id` | Update breed information | Yes |
-| `DELETE` | `/api/breeds/:id` | Delete a breed record | Yes |
-
-### Health & Bird Conditions (`/api/bird-conditions`)
-| Method | Endpoint | Description | Auth Required |
-|---|---|---|---|
-| `GET` | `/api/bird-conditions?houseId=:id` | List condition records for a house | Yes |
-| `POST` | `/api/bird-conditions` | Record flock health check | Yes |
-| `GET` | `/api/bird-conditions/:id` | Get specific health condition log | Yes |
-| `PUT` | `/api/bird-conditions/:id` | Update health condition record | Yes |
-| `DELETE` | `/api/bird-conditions/:id` | Delete health condition record | Yes |
-
-### Slaughter Planning (`/api/slaughter-plans`)
-| Method | Endpoint | Description | Auth Required |
-|---|---|---|---|
-| `GET` | `/api/slaughter-plans?houseId=:id` | List slaughter plans with computed status | Yes |
-| `POST` | `/api/slaughter-plans` | Schedule a new slaughter plan | Yes |
-| `GET` | `/api/slaughter-plans/:id` | Get slaughter plan details | Yes |
-| `PUT` | `/api/slaughter-plans/:id` | Update slaughter plan | Yes |
-| `PATCH` | `/api/slaughter-plans/:id/complete` | Toggle harvest completion status | Yes |
-| `DELETE` | `/api/slaughter-plans/:id` | Delete a slaughter plan | Yes |
-
-### Daily Records (`/api/daily-records`)
-| Method | Endpoint | Description | Auth Required |
-|---|---|---|---|
-| `GET` | `/api/daily-records?houseId=:id` | List daily records (filtered by house) | Yes |
-| `POST` | `/api/daily-records` | Log daily mortality, feed, and eggs | Yes |
-| `GET` | `/api/daily-records/:id` | Get single daily record | Yes |
-| `PUT` | `/api/daily-records/:id` | Update daily record | Yes |
-| `DELETE` | `/api/daily-records/:id` | Delete daily record | Yes |
-
-### System Health
-| Method | Endpoint | Description | Auth Required |
-|---|---|---|---|
-| `GET` | `/api/health` | Health check endpoint | No |
-
----
-
-## Database Models
-
-```mermaid
-erDiagram
-    User ||--o{ PoultryHouse : "owns"
-    PoultryHouse ||--o{ DailyRecord : "has"
-    PoultryHouse ||--o{ Breed : "contains"
-    PoultryHouse ||--o{ BirdCondition : "tracks"
-    PoultryHouse ||--o{ SlaughterPlan : "schedules"
-    Breed ||--o{ BirdCondition : "referenced by"
-    Breed ||--o{ SlaughterPlan : "referenced by"
-
-    User {
-        Int id PK
-        String email UK
-        String password
-        String name
-        DateTime createdAt
-    }
-
-    PoultryHouse {
-        Int id PK
-        Int userId FK
-        String name
-        Int birdsPlaced
-        DateTime createdAt
-    }
-
-    Breed {
-        Int id PK
-        Int houseId FK
-        String name
-        String description
-        Int numberOfBirds
-        DateTime dateAdded
-    }
-
-    BirdCondition {
-        Int id PK
-        Int houseId FK
-        Int breedId FK
-        Int healthy
-        Int sick
-        Int weak
-        Int underObservation
-        String notes
-        DateTime recordDate
-    }
-
-    SlaughterPlan {
-        Int id PK
-        Int houseId FK
-        Int breedId FK
-        Int numberOfBirds
-        DateTime placementDate
-        DateTime expectedSlaughterDate
-        String status
-        String notes
-    }
-
-    DailyRecord {
-        Int id PK
-        Int houseId FK
-        DateTime date
-        Int mortality
-        Float feedUsedKg
-        Int eggsCollected
-    }
+# Client running at http://localhost:5173
 ```
 
 ---
 
-## Testing & Quality Assurance
+## 🧪 Testing & Quality Assurance
 
-### Automated Backend Tests
-Run the comprehensive integration test suite verifying user isolation, authentication guards, capacity validation, and feature lifecycles:
-
+Run the automated backend test suite:
 ```bash
 cd backend
 npm test
 ```
 
-### Frontend Linting & Build Verification
-
+Verify frontend linting and build:
 ```bash
 cd frontend
-npm run lint    # ESLint verification
-npm run build   # Production bundle build
+npm run lint
+npm run build
 ```
 
 ---
 
-## Deployment Configuration
+## 📄 License
 
-### Backend Deployment (e.g. Render / Railway)
-- **Root Directory:** `backend`
-- **Build Command:** `npm install && npx prisma generate && npx prisma migrate deploy`
-- **Start Command:** `npm start`
-- **Environment Variables:**
-  - `DATABASE_URL`: PostgreSQL connection string
-  - `JWT_SECRET`: Secure random string
-  - `NODE_ENV`: `production`
-  - `CORS_ORIGIN`: Your production frontend URL (e.g. `https://your-farm.vercel.app`)
-
-### Frontend Deployment (e.g. Vercel / Netlify)
-- **Root Directory:** `frontend`
-- **Build Command:** `npm run build`
-- **Output Directory:** `dist`
-- **Environment Variables:**
-  - `VITE_API_URL`: Your deployed backend API URL (e.g. `https://your-api.railway.app/api`)
-
----
-
-## License
-
-This project is distributed under the MIT License. See [LICENSE](LICENSE) for details.
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.
