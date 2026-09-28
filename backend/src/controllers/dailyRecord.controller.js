@@ -8,6 +8,11 @@ const {
   sumCorrectedMortality,
   sumCorrectedEggs,
 } = require("../services/correction.service");
+const {
+  applyEggStockChange,
+  revertEggMovement,
+} = require("../services/egg-inventory.service");
+const { assertFlockOperational } = require("../services/flock-lifecycle.service");
 
 /**
  * DAILY RECORD SCOPE SEMANTICS (HOUSE vs FLOCK)
@@ -93,6 +98,8 @@ const createDailyRecord = async (req, res, next) => {
           error.code = "FLOCK_HOUSE_MISMATCH";
           throw error;
         }
+        // Phase 4.4 — closed flocks reject new operational records.
+        assertFlockOperational(flock);
       }
 
       let feedType = null;
@@ -237,7 +244,30 @@ const createDailyRecord = async (req, res, next) => {
         };
       }
 
-      return { record, inventory: inventoryEffect };
+      // Phase 4.2 — Egg collection enters egg inventory exactly once.
+      // PRODUCTION movement is unique per daily record (database
+      // constraint), so a retried create cannot double-add eggs.
+      let eggEffect = null;
+      const collectedEggs = Number(eggsCollected) || 0;
+      if (collectedEggs > 0) {
+        const eggResult = await applyEggStockChange(transaction, {
+          userId: req.user.id,
+          delta: collectedEggs,
+          type: "PRODUCTION",
+          houseId: house.id,
+          flockId: flock ? flock.id : null,
+          dailyRecordId: record.id,
+          date: new Date(date),
+          reason: `Egg collection for ${house.name} (${collectedEggs} eggs)`,
+        });
+        eggEffect = {
+          collectedEggs,
+          stockBefore: eggResult.stockBefore,
+          stockAfter: eggResult.stockAfter,
+        };
+      }
+
+      return { record, inventory: inventoryEffect, eggInventory: eggEffect };
     });
 
     res.status(201).json({
@@ -245,13 +275,15 @@ const createDailyRecord = async (req, res, next) => {
       message: "Daily record created successfully",
       data: dailyRecord.record,
       inventory: dailyRecord.inventory,
+      eggInventory: dailyRecord.eggInventory,
     });
   } catch (error) {
     if (
       error.code === "INSUFFICIENT_STOCK" ||
       error.code === "UNSUPPORTED_UNIT" ||
       error.code === "INVALID_BAG_WEIGHT" ||
-      error.code === "FLOCK_HOUSE_MISMATCH"
+      error.code === "FLOCK_HOUSE_MISMATCH" ||
+      error.code === "FLOCK_NOT_ACTIVE"
     ) {
       return res.status(400).json({
         success: false,
@@ -441,6 +473,7 @@ const updateDailyRecord = async (req, res, next) => {
         },
         include: {
           inventoryMovements: true,
+          eggMovements: true,
           house: true,
         },
       });
@@ -492,6 +525,10 @@ const updateDailyRecord = async (req, res, next) => {
           const error = new Error("Flock does not belong to the selected poultry house");
           error.code = "FLOCK_HOUSE_MISMATCH";
           throw error;
+        }
+        // Phase 4.4 — records may not be moved onto a closed flock.
+        if (resolvedFlockId !== existingRecord.flockId) {
+          assertFlockOperational(flock);
         }
       }
 
@@ -638,6 +675,37 @@ const updateDailyRecord = async (req, res, next) => {
         };
       }
 
+      // Phase 4.2 — revert the record's egg contribution, then re-apply
+      // the new value. Net stock movement equals the difference only, so
+      // editing 100 -> 120 adds +20 and 120 -> 80 removes 40.
+      const existingEggMovement = (existingRecord.eggMovements || []).find(
+        (m) => m.type === "PRODUCTION"
+      );
+      if (existingEggMovement) {
+        await revertEggMovement(transaction, existingEggMovement);
+      }
+
+      const finalEggs =
+        eggsCollected !== undefined ? Number(eggsCollected) : existingRecord.eggsCollected;
+      let eggEffect = null;
+      if (finalEggs > 0) {
+        const eggResult = await applyEggStockChange(transaction, {
+          userId: req.user.id,
+          delta: finalEggs,
+          type: "PRODUCTION",
+          houseId: house.id,
+          flockId: resolvedFlockId,
+          dailyRecordId: existingRecord.id,
+          date: new Date(date || existingRecord.date),
+          reason: `Egg collection for ${house.name} (${finalEggs} eggs)`,
+        });
+        eggEffect = {
+          collectedEggs: finalEggs,
+          stockBefore: eggResult.stockBefore,
+          stockAfter: eggResult.stockAfter,
+        };
+      }
+
       // Re-sync previous flock's currentBirds if flock changed
       if (existingRecord.flockId && existingRecord.flockId !== resolvedFlockId) {
         const prevFlock = await transaction.flock.findUnique({
@@ -697,7 +765,7 @@ const updateDailyRecord = async (req, res, next) => {
         },
       });
 
-      return { record: savedRecord, inventory: inventoryEffect };
+      return { record: savedRecord, inventory: inventoryEffect, eggInventory: eggEffect };
     });
 
     res.json({
@@ -705,13 +773,16 @@ const updateDailyRecord = async (req, res, next) => {
       message: "Daily record updated successfully",
       data: updatedRecord.record,
       inventory: updatedRecord.inventory,
+      eggInventory: updatedRecord.eggInventory,
     });
   } catch (error) {
     if (
       error.code === "INSUFFICIENT_STOCK" ||
       error.code === "UNSUPPORTED_UNIT" ||
       error.code === "INVALID_BAG_WEIGHT" ||
-      error.code === "FLOCK_HOUSE_MISMATCH"
+      error.code === "FLOCK_HOUSE_MISMATCH" ||
+      error.code === "NEGATIVE_EGG_STOCK" ||
+      error.code === "FLOCK_NOT_ACTIVE"
     ) {
       return res.status(400).json({
         success: false,
@@ -766,7 +837,8 @@ const updateDailyRecord = async (req, res, next) => {
 };
 
 /**
- * Deletes a daily record, restoring any deducted feed consumption stock.
+ * Deletes a daily record, restoring any deducted feed consumption stock
+ * and reversing its egg inventory contribution.
  */
 const deleteDailyRecord = async (req, res, next) => {
   try {
@@ -782,6 +854,7 @@ const deleteDailyRecord = async (req, res, next) => {
         },
         include: {
           inventoryMovements: true,
+          eggMovements: true,
         },
       });
 
@@ -817,6 +890,16 @@ const deleteDailyRecord = async (req, res, next) => {
         await tx.inventoryMovement.delete({
           where: { id: mov.id },
         });
+      }
+
+      // Phase 4.2 — reverse the record's egg contribution. Throws
+      // NEGATIVE_EGG_STOCK when the produced eggs were already sold or
+      // removed, instead of driving stock negative.
+      const eggProduction = (record.eggMovements || []).find(
+        (m) => m.type === "PRODUCTION"
+      );
+      if (eggProduction) {
+        await revertEggMovement(tx, eggProduction);
       }
 
       // Re-sync flock currentBirds if the record had a flock
@@ -856,6 +939,12 @@ const deleteDailyRecord = async (req, res, next) => {
   } catch (error) {
     if (error.code === "RECORD_NOT_FOUND") {
       return res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    if (error.code === "NEGATIVE_EGG_STOCK") {
+      return res.status(400).json({
         success: false,
         message: error.message,
       });

@@ -1255,6 +1255,11 @@ const createDepopulationEventSchema = z.object({
     ]),
   notes: z.string().max(500, "Notes cannot exceed 500 characters").optional().nullable(),
   incomeId: z.coerce.number().int().positive().optional().nullable(),
+  unitPrice: z.coerce.number().nonnegative("Unit price cannot be negative").optional().nullable(),
+  amount: z.coerce.number().positive("Amount must be greater than 0").optional().nullable(),
+  customerId: z.coerce.number().int().positive().optional().nullable(),
+  amountPaid: z.coerce.number().nonnegative("Amount paid cannot be negative").optional().nullable(),
+  paymentStatus: z.enum(["PAID", "PARTIALLY_PAID", "UNPAID"]).optional().nullable(),
 });
 
 const updateDepopulationEventSchema = z.object({
@@ -1276,6 +1281,93 @@ const updateDepopulationEventSchema = z.object({
     .optional(),
   notes: z.string().max(500, "Notes cannot exceed 500 characters").optional().nullable(),
   incomeId: z.coerce.number().int().positive().optional().nullable(),
+  unitPrice: z.coerce.number().nonnegative("Unit price cannot be negative").optional().nullable(),
+  amount: z.coerce.number().positive("Amount must be greater than 0").optional().nullable(),
+  customerId: z.coerce.number().int().positive().optional().nullable(),
+  amountPaid: z.coerce.number().nonnegative("Amount paid cannot be negative").optional().nullable(),
+  paymentStatus: z.enum(["PAID", "PARTIALLY_PAID", "UNPAID"]).optional().nullable(),
+});
+
+// Phase 4.2 — Egg sales (pieces; unitPrice = GMD price per egg) and
+// manual egg stock adjustments (ADJUSTMENT, WASTAGE, RETURN only).
+const createEggSaleSchema = z.object({
+  houseId: z.coerce.number().int().positive().optional().nullable(),
+  flockId: z.coerce.number().int().positive().optional().nullable(),
+  customerId: z.coerce.number().int().positive().optional().nullable(),
+  quantity: z
+    .number({ invalid_type_error: "Quantity must be a number" })
+    .int("Quantity must be a whole number of eggs")
+    .positive("Quantity must be greater than 0"),
+  unitPrice: z.coerce.number().nonnegative("Price per egg cannot be negative").optional().nullable(),
+  amount: z.coerce.number().positive("Amount must be greater than 0").optional().nullable(),
+  amountPaid: z.coerce.number().nonnegative("Amount paid cannot be negative").optional().nullable(),
+  paymentStatus: z.enum(["PAID", "PARTIALLY_PAID", "UNPAID"]).optional().nullable(),
+  date: z
+    .union([
+      z.string().refine((val) => !isNaN(Date.parse(val)), "Date must be a valid ISO date"),
+      z.date(),
+    ])
+    .optional(),
+  notes: z.string().max(500, "Notes cannot exceed 500 characters").optional().nullable(),
+  incomeId: z.coerce.number().int().positive().optional().nullable(),
+});
+
+const updateEggSaleSchema = z.object({
+  houseId: z.coerce.number().int().positive().optional().nullable(),
+  flockId: z.coerce.number().int().positive().optional().nullable(),
+  customerId: z.coerce.number().int().positive().optional().nullable(),
+  quantity: z
+    .number({ invalid_type_error: "Quantity must be a number" })
+    .int("Quantity must be a whole number of eggs")
+    .positive("Quantity must be greater than 0")
+    .optional(),
+  unitPrice: z.coerce.number().nonnegative("Price per egg cannot be negative").optional().nullable(),
+  amount: z.coerce.number().positive("Amount must be greater than 0").optional().nullable(),
+  amountPaid: z.coerce.number().nonnegative("Amount paid cannot be negative").optional().nullable(),
+  paymentStatus: z.enum(["PAID", "PARTIALLY_PAID", "UNPAID"]).optional().nullable(),
+  date: z
+    .union([
+      z.string().refine((val) => !isNaN(Date.parse(val)), "Date must be a valid ISO date"),
+      z.date(),
+    ])
+    .optional(),
+  notes: z.string().max(500, "Notes cannot exceed 500 characters").optional().nullable(),
+  incomeId: z.coerce.number().int().positive().optional().nullable(),
+});
+
+const eggAdjustmentSchema = z.object({
+  type: z
+    .enum(["ADJUSTMENT", "WASTAGE", "RETURN"], {
+      error: "Manual egg movements must be ADJUSTMENT, WASTAGE, or RETURN. Production and sales are recorded automatically.",
+    })
+    .default("ADJUSTMENT"),
+  quantity: z.coerce
+    .number({ error: "Quantity is required" })
+    .int("Quantity must be a whole number of eggs")
+    .refine((val) => val !== 0, { message: "Adjustment quantity cannot be zero" }),
+  reason: z
+    .string()
+    .trim()
+    .optional()
+    .nullable(),
+  date: z.coerce
+    .date({ error: "Date must be a valid date" })
+    .optional(),
+  houseId: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .nullable(),
+});
+
+// Phase 4.4 — Flock closeout / reopen lifecycle transitions.
+const flockCloseoutSchema = z.object({
+  status: z.enum(["ACTIVE", "COMPLETED", "SOLD", "SLAUGHTERED", "ARCHIVED"], {
+    error: "Status must be one of: ACTIVE, COMPLETED, SOLD, SLAUGHTERED, ARCHIVED",
+  }),
+  acknowledgeRemainingBirds: z.boolean().optional().default(false),
+  notes: z.string().max(500, "Notes cannot exceed 500 characters").optional().nullable(),
 });
 
 module.exports = {
@@ -1320,4 +1412,8 @@ module.exports = {
   DEPOPULATION_REASONS,
   createDepopulationEventSchema,
   updateDepopulationEventSchema,
+  createEggSaleSchema,
+  updateEggSaleSchema,
+  eggAdjustmentSchema,
+  flockCloseoutSchema,
 };

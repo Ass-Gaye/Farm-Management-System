@@ -424,6 +424,16 @@ const toggleSlaughterPlanComplete = async (req, res, next) => {
         const correctedSum = (rows) => sumCorrectedMortality(rows, countAdj);
 
         if (newStatus === "Completed") {
+          // Phase 4.4 — completing a plan onto a closed flock would write
+          // a new depopulation record there; block it instead.
+          if (flockWithCounts && flockWithCounts.status !== "ACTIVE") {
+            const error = new Error(
+              `This flock ("${flockWithCounts.name}") is closed and cannot receive new operational records. Reopen the flock first.`
+            );
+            error.code = "FLOCK_NOT_ACTIVE";
+            throw error;
+          }
+
           const existingEvent = await tx.depopulationEvent.findFirst({
             where: {
               userId: req.user.id,
@@ -513,6 +523,12 @@ const toggleSlaughterPlanComplete = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: "Slaughter plan not found",
+      });
+    }
+    if (error.code === "FLOCK_NOT_ACTIVE") {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
       });
     }
     next(error);

@@ -24,7 +24,9 @@ function FinanceTransactionModal({
   customers = [],
   suppliers: propSuppliers = [],
   breeds = [],
+  flocks = [],
   defaultHouseId = null,
+  defaultFlockId = null,
   defaultCategory = null,
   currency = DEFAULT_CURRENCY,
   onSuccess,
@@ -66,6 +68,7 @@ function FinanceTransactionModal({
     amountPaid: "",
     date: new Date().toISOString().split("T")[0],
     houseId: "",
+    flockId: "",
     description: "",
   });
 
@@ -119,6 +122,7 @@ function FinanceTransactionModal({
         amountPaid: paid,
         date: initialData.date ? new Date(initialData.date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
         houseId: initialData.houseId ? String(initialData.houseId) : "",
+        flockId: initialData.flockId ? String(initialData.flockId) : "",
         description: initialData.description || "",
       });
     } else {
@@ -140,12 +144,13 @@ function FinanceTransactionModal({
         amountPaid: "",
         date: new Date().toISOString().split("T")[0],
         houseId: defaultHouseId ? String(defaultHouseId) : "",
+        flockId: defaultFlockId ? String(defaultFlockId) : "",
         description: "",
       });
     }
     setError("");
     setSuccessInventory(null);
-  }, [initialData, initialType, defaultHouseId, defaultCategory, isOpen]);
+  }, [initialData, initialType, defaultHouseId, defaultFlockId, defaultCategory, isOpen]);
 
   if (!isOpen) return null;
 
@@ -330,6 +335,7 @@ function FinanceTransactionModal({
       category: finalCategory.trim(),
       date: formData.date,
       houseId: formData.houseId ? Number(formData.houseId) : null,
+      flockId: formData.flockId ? Number(formData.flockId) : null,
       description: formData.description ? formData.description.trim() : null,
       quantity: formData.quantity ? parseFloat(formData.quantity) : null,
       unit: formData.unit ? formData.unit.trim() : null,
@@ -812,6 +818,25 @@ function FinanceTransactionModal({
                 ))}
               </select>
             </div>
+
+            {flocks?.length > 0 && (
+              <div className="form-group">
+                <label htmlFor="tx-flock">Flock / Batch (Optional)</label>
+                <select
+                  id="tx-flock"
+                  name="flockId"
+                  value={formData.flockId}
+                  onChange={handleChange}
+                >
+                  <option value="">Not linked to a flock</option>
+                  {flocks.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {isBirdSale && breeds?.length > 0 && (
               <div className="form-group">

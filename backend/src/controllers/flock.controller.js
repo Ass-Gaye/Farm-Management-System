@@ -1,9 +1,12 @@
 const prisma = require("../lib/prisma");
+const { runSerializable } = require("../lib/transaction");
+const { resolveTransition } = require("../services/flock-lifecycle.service");
 const {
   getAdjustmentMaps,
   sumCorrectedMortality,
   sumCorrectedEggs,
   correctedEggsOf,
+  correctedMortalityOf,
 } = require("../services/correction.service");
 
 /**
@@ -35,6 +38,25 @@ const calculateFlockAge = (placementDate) => {
     weeks,
     formatted,
   };
+};
+
+/**
+ * Sums recorded CONSUMPTION movement costs tied to the given daily
+ * records. Feed purchases are farm-level; only consumption stamped with
+ * a dailyRecordId can be attributed to a flock, so this is a component
+ * breakdown — never added on top of Expense totals.
+ */
+const sumFlockFeedCost = async (client, userId, recordIds) => {
+  if (!recordIds || recordIds.length === 0) return 0;
+  const agg = await client.inventoryMovement.aggregate({
+    where: {
+      userId,
+      dailyRecordId: { in: recordIds },
+      type: "CONSUMPTION",
+    },
+    _sum: { totalCost: true },
+  });
+  return Number(Number(agg._sum.totalCost || 0).toFixed(2));
 };
 
 /**
@@ -343,7 +365,8 @@ const getFlockById = async (req, res, next) => {
       }
     }
 
-    // Financial calculations
+    // Financial calculations (flock-linked records only; house/farm-level
+    // rows are never allocated to a flock).
     const totalFlockExpenses = flock.expenses.reduce((sum, e) => sum + Number(e.amount), 0);
     const totalFlockRevenue = flock.income.reduce((sum, i) => sum + Number(i.amount), 0);
     const netProfitLoss = Number((totalFlockRevenue - totalFlockExpenses).toFixed(2));
@@ -351,6 +374,15 @@ const getFlockById = async (req, res, next) => {
       flock.birdsPlaced > 0 ? Number((totalFlockExpenses / flock.birdsPlaced).toFixed(2)) : 0;
     const revenuePerBird =
       flock.birdsPlaced > 0 ? Number((totalFlockRevenue / flock.birdsPlaced).toFixed(2)) : 0;
+
+    // Phase 4.3 — derived cost components (no allocation invented):
+    // feedCost = actual CONSUMPTION movement costs tied to this flock's
+    // daily records; vaccineCost = recorded Vaccination.cost rows.
+    const recordIds = flock.dailyRecords.map((r) => r.id);
+    const feedCost = await sumFlockFeedCost(prisma, userId, recordIds);
+    const vaccineCost = Number(
+      flock.vaccinations.reduce((sum, v) => sum + Number(v.cost || 0), 0).toFixed(2)
+    );
 
     // Pending vs completed vaccinations
     const pendingVaccinations = flock.vaccinations.filter((v) => v.status === "PENDING").length;
@@ -395,6 +427,8 @@ const getFlockById = async (req, res, next) => {
           netProfitLoss,
           costPerBird,
           revenuePerBird,
+          feedCost,
+          vaccineCost,
           currency: "GMD",
         },
         healthSummary: {
@@ -411,6 +445,302 @@ const getFlockById = async (req, res, next) => {
       },
     });
   } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Returns per-period production trends for a flock (Phase 4.3).
+ * range=30d -> daily periods; range=12w -> weekly periods (Monday start).
+ * Eggs/mortality use corrected values; liveBirds follows the existing
+ * birdsPlaced - correctedMortality - depopulated rule at each period end.
+ * Only dates with records produce periods (no fabricated rows).
+ */
+const getFlockTrends = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const range = String(req.query.range || "30d").toLowerCase();
+
+    if (range !== "30d" && range !== "12w") {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid range. Supported values are "30d" and "12w".',
+      });
+    }
+
+    const flock = await prisma.flock.findFirst({
+      where: { id: Number(id), userId },
+      select: { id: true, name: true, birdsPlaced: true },
+    });
+    if (!flock) {
+      return res.status(404).json({ success: false, message: "Flock not found" });
+    }
+
+    const days = range === "30d" ? 30 : 84;
+    const cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - (days - 1));
+
+    // All flock records (for cumulative bird counts) + depopulation events.
+    const [allRecords, depopEvents] = await Promise.all([
+      prisma.dailyRecord.findMany({
+        where: { flockId: flock.id, house: { userId } },
+        select: { id: true, date: true, mortality: true, feedUsedKg: true, eggsCollected: true },
+        orderBy: { date: "asc" },
+      }),
+      prisma.depopulationEvent.findMany({
+        where: { flockId: flock.id, userId },
+        select: { date: true, quantity: true },
+        orderBy: { date: "asc" },
+      }),
+    ]);
+
+    const adjMap = await getAdjustmentMaps(
+      prisma,
+      allRecords.map((r) => r.id),
+      userId
+    );
+
+    const dayKey = (d) => {
+      const dt = new Date(d);
+      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    };
+    const weekStartKey = (d) => {
+      const dt = new Date(d);
+      dt.setHours(0, 0, 0, 0);
+      const dow = (dt.getDay() + 6) % 7; // Monday = 0
+      dt.setDate(dt.getDate() - dow);
+      return dayKey(dt);
+    };
+
+    const bucketKey = range === "30d" ? dayKey : weekStartKey;
+    const buckets = new Map();
+
+    // Cumulative counts over the full history so liveBirds at each
+    // period end respects the standard bird-count rule.
+    let cumMortality = 0;
+    let cumDepopulated = 0;
+    let depopIdx = 0;
+
+    const sortedDepops = depopEvents;
+    const periodEndLive = new Map(); // bucketKey -> liveBirds at bucket end
+
+    for (const record of allRecords) {
+      const recordDate = new Date(record.date);
+      while (depopIdx < sortedDepops.length && new Date(sortedDepops[depopIdx].date) <= recordDate) {
+        cumDepopulated += sortedDepops[depopIdx].quantity;
+        depopIdx += 1;
+      }
+      cumMortality += correctedMortalityOf(record, adjMap);
+
+      if (recordDate < cutoff) continue;
+
+      const key = bucketKey(recordDate);
+      const bucket = buckets.get(key) || { eggs: 0, mortality: 0, feedKg: 0, endDate: recordDate };
+      bucket.eggs += correctedEggsOf(record, adjMap);
+      bucket.mortality += correctedMortalityOf(record, adjMap);
+      bucket.feedKg += Number(record.feedUsedKg) || 0;
+      if (recordDate >= bucket.endDate) bucket.endDate = recordDate;
+      buckets.set(key, bucket);
+      periodEndLive.set(
+        key,
+        Math.max(0, flock.birdsPlaced - cumMortality - cumDepopulated)
+      );
+    }
+
+    const periods = [...buckets.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([key, b]) => ({
+        date: key,
+        eggs: b.eggs,
+        mortality: b.mortality,
+        feedKg: Number(b.feedKg.toFixed(2)),
+        liveBirds: periodEndLive.get(key) ?? 0,
+      }));
+
+    res.json({
+      success: true,
+      data: {
+        flock: { id: flock.id, name: flock.name },
+        range,
+        periods,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Closes or reopens a flock (Phase 4.4 operational lock).
+ * Validates the transition, reconciles birds/production/egg flow/feed/
+ * finance from authoritative sources, and updates the status atomically.
+ * Closed flocks reject new operational records; corrections of existing
+ * history remain allowed.
+ */
+const closeoutFlock = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const { status: requestedStatus, acknowledgeRemainingBirds = false, notes } = req.body;
+
+    const summary = await runSerializable(async (tx) => {
+      const flock = await tx.flock.findFirst({
+        where: { id: Number(id), userId },
+        include: {
+          dailyRecords: {
+            select: { id: true, date: true, mortality: true, feedUsedKg: true, eggsCollected: true, avgWeightGrams: true },
+          },
+          depopulationEvents: { select: { quantity: true } },
+          expenses: { select: { amount: true } },
+          income: { select: { amount: true } },
+          vaccinations: { select: { cost: true } },
+        },
+      });
+
+      if (!flock) {
+        const error = new Error("Flock not found");
+        error.code = "FLOCK_NOT_FOUND";
+        throw error;
+      }
+
+      const transition = resolveTransition(flock.status, requestedStatus);
+
+      // Reconciliation uses the exact Phase 4.3 formulas.
+      const adjMap = await getAdjustmentMaps(
+        tx,
+        flock.dailyRecords.map((r) => r.id),
+        userId
+      );
+      const correctedMortality = sumCorrectedMortality(flock.dailyRecords, adjMap);
+      const totalDepopulated = (flock.depopulationEvents || []).reduce((sum, e) => sum + e.quantity, 0);
+      const liveBirds = Math.max(0, flock.birdsPlaced - correctedMortality - totalDepopulated);
+      const mortalityRate =
+        flock.birdsPlaced > 0
+          ? Number(((correctedMortality / flock.birdsPlaced) * 100).toFixed(2))
+          : 0;
+
+      if (
+        (transition.kind === "CLOSE" || transition.kind === "RECLOSE") &&
+        liveBirds > 0 &&
+        acknowledgeRemainingBirds !== true
+      ) {
+        const error = new Error(
+          `This flock still has ${liveBirds} live birds. Explicit acknowledgment is required before closing it.`
+        );
+        error.code = "FLOCK_REMAINING_BIRDS";
+        throw error;
+      }
+
+      const totalFeedKg = flock.dailyRecords.reduce((sum, r) => sum + Number(r.feedUsedKg || 0), 0);
+      const totalEggs = sumCorrectedEggs(flock.dailyRecords, adjMap);
+      const daysInProd = flock.dailyRecords.length;
+      const weights = flock.dailyRecords
+        .filter((r) => Number(r.avgWeightGrams) > 0)
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+      const latestWeightGrams = weights.length > 0 ? Number(weights[0].avgWeightGrams) : null;
+
+      const eggFlowRows = await tx.eggMovement.groupBy({
+        by: ["type"],
+        where: { userId, flockId: flock.id },
+        _sum: { quantity: true },
+      });
+      const eggFlow = { produced: 0, sold: 0, wasted: 0, adjusted: 0, returned: 0, corrected: 0 };
+      for (const row of eggFlowRows) {
+        const qty = Number(row._sum.quantity || 0);
+        if (row.type === "PRODUCTION") eggFlow.produced = qty;
+        else if (row.type === "SALE") eggFlow.sold = Math.abs(qty);
+        else if (row.type === "WASTAGE") eggFlow.wasted = Math.abs(qty);
+        else if (row.type === "ADJUSTMENT") eggFlow.adjusted = qty;
+        else if (row.type === "RETURN") eggFlow.returned = qty;
+        else if (row.type === "CORRECTION") eggFlow.corrected = qty;
+      }
+
+      const recordIds = flock.dailyRecords.map((r) => r.id);
+      const feedCost = await sumFlockFeedCost(tx, userId, recordIds);
+      const vaccineCost = Number(
+        flock.vaccinations.reduce((sum, v) => sum + Number(v.cost || 0), 0).toFixed(2)
+      );
+      const totalExpenses = flock.expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+      const totalRevenue = flock.income.reduce((sum, i) => sum + Number(i.amount), 0);
+
+      let updated = flock;
+      if (transition.kind !== "NO_OP") {
+        const trimmedNotes = notes !== undefined && notes !== null ? String(notes).trim() : "";
+        const existingNotes = await tx.flock.findUnique({
+          where: { id: flock.id },
+          select: { notes: true },
+        });
+        updated = await tx.flock.update({
+          where: { id: flock.id },
+          data: {
+            status: transition.to,
+            notes:
+              trimmedNotes
+                ? `${existingNotes?.notes ? `${existingNotes.notes}\n` : ""}[Closeout ${transition.to} ${new Date().toISOString().split("T")[0]}] ${trimmedNotes}`
+                : undefined,
+          },
+          select: { id: true, name: true, status: true },
+        });
+      }
+
+      return {
+        flock: { id: flock.id, name: flock.name },
+        transition: transition.kind,
+        previousStatus: transition.from,
+        status: transition.kind === "NO_OP" ? transition.from : transition.to,
+        acknowledgedRemainingBirds:
+          (transition.kind === "CLOSE" || transition.kind === "RECLOSE") && liveBirds > 0
+            ? true
+            : false,
+        birds: {
+          birdsPlaced: flock.birdsPlaced,
+          correctedMortality,
+          totalDepopulated,
+          liveBirds,
+          mortalityRate,
+        },
+        production: {
+          totalEggs,
+          totalFeedKg: Number(totalFeedKg.toFixed(2)),
+          totalMortality: correctedMortality,
+          totalDepopulated,
+          liveBirds,
+          latestWeightGrams,
+          productionDays: daysInProd,
+        },
+        eggFlow,
+        feed: {
+          totalFeedKg: Number(totalFeedKg.toFixed(2)),
+          feedCost,
+        },
+        financials: {
+          totalRevenue,
+          totalExpenses,
+          feedCost,
+          vaccineCost,
+          netProfitLoss: Number((totalRevenue - totalExpenses).toFixed(2)),
+          currency: "GMD",
+        },
+      };
+    });
+
+    const messages = {
+      CLOSE: "Flock closed successfully.",
+      REOPEN: "Flock reopened successfully.",
+      RECLOSE: "Flock status updated successfully.",
+      NO_OP: "Flock is already in the requested status.",
+    };
+
+    res.json({ success: true, message: messages[summary.transition], data: summary });
+  } catch (error) {
+    if (error.code === "FLOCK_NOT_FOUND") {
+      return res.status(404).json({ success: false, message: error.message });
+    }
+    if (error.code === "FLOCK_REMAINING_BIRDS" || error.code === "INVALID_STATUS_TRANSITION") {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     next(error);
   }
 };
@@ -465,6 +795,16 @@ const updateFlock = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: `Birds placed (${newBirdsPlaced}) cannot be less than recorded mortality (${totalMortality}) + depopulated birds (${totalDepopulated})`,
+      });
+    }
+
+    // Phase 4.4 — lifecycle transitions must go through the closeout
+    // endpoint so validation, reconciliation, and the operational lock
+    // apply. Direct status edits are rejected.
+    if (status !== undefined && String(status).toUpperCase() !== String(existingFlock.status).toUpperCase()) {
+      return res.status(400).json({
+        success: false,
+        message: "Flock status changes must use the closeout endpoint (POST /api/flocks/:id/closeout).",
       });
     }
 
@@ -580,6 +920,8 @@ module.exports = {
   createFlock,
   getFlocks,
   getFlockById,
+  getFlockTrends,
+  closeoutFlock,
   updateFlock,
   deleteFlock,
 };

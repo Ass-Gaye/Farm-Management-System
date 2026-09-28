@@ -4,6 +4,8 @@ const {
   getAdjustmentMaps,
   sumCorrectedMortality,
 } = require("../services/correction.service");
+const { computePaymentState } = require("../services/finance.service");
+const { assertFlockOperational } = require("../services/flock-lifecycle.service");
 
 /**
  * Transaction-scoped live-bird calculation (reads via tx client so
@@ -96,7 +98,18 @@ const createDepopulationEvent = async (req, res, next) => {
     const userId = req.user.id;
     const rawFlockId = req.params.flockId || req.body.flockId;
     const flockId = rawFlockId ? Number(rawFlockId) : null;
-    const { quantity, reason, date, notes, incomeId } = req.body;
+    const {
+      quantity,
+      reason,
+      date,
+      notes,
+      incomeId,
+      unitPrice,
+      amount,
+      customerId,
+      amountPaid,
+      paymentStatus,
+    } = req.body;
 
     if (!flockId) {
       return res.status(400).json({
@@ -113,8 +126,8 @@ const createDepopulationEvent = async (req, res, next) => {
       });
     }
 
-    // All bird-count reads/writes happen inside one serializable
-    // transaction (ownership, headroom, create, flock sync).
+    // All bird-count reads/writes and income creation happen inside one
+    // serializable transaction (ownership, headroom, create, flock sync).
     let event;
     let liveBirdsAfter;
     try {
@@ -129,6 +142,9 @@ const createDepopulationEvent = async (req, res, next) => {
           throw error;
         }
 
+        // Phase 4.4 — closed flocks reject new operational records.
+        assertFlockOperational(ownedFlock);
+
         // Calculate available live birds inside the transaction
         const birdStats = await calculateLiveBirdsTx(tx, flockId);
         if (numQuantity > birdStats.liveBirds) {
@@ -137,6 +153,18 @@ const createDepopulationEvent = async (req, res, next) => {
           );
           error.code = "NO_HEADROOM";
           throw error;
+        }
+
+        // If customerId is provided, verify it belongs to this user
+        if (customerId) {
+          const customer = await tx.customer.findFirst({
+            where: { id: Number(customerId), userId },
+          });
+          if (!customer) {
+            const error = new Error("Customer not found or does not belong to your farm");
+            error.code = "CUSTOMER_NOT_FOUND";
+            throw error;
+          }
         }
 
         // If incomeId is provided, verify it belongs to this user
@@ -151,6 +179,45 @@ const createDepopulationEvent = async (req, res, next) => {
           }
         }
 
+        let resolvedIncomeId = incomeId ? Number(incomeId) : null;
+
+        // Automatically create Income if reason === "SOLD" and no incomeId was provided
+        if (reason === "SOLD" && !resolvedIncomeId) {
+          let finalAmount = amount !== undefined && amount !== null && amount !== "" ? Number(amount) : null;
+          if (finalAmount === null && unitPrice !== undefined && unitPrice !== null && unitPrice !== "") {
+            finalAmount = Number((numQuantity * Number(unitPrice)).toFixed(2));
+          }
+
+          if (finalAmount !== null && finalAmount > 0) {
+            const payState = computePaymentState(finalAmount, amountPaid, paymentStatus);
+            const numUnitPrice =
+              unitPrice !== undefined && unitPrice !== null && unitPrice !== ""
+                ? Number(unitPrice)
+                : Number((payState.amount / numQuantity).toFixed(2));
+
+            const createdIncome = await tx.income.create({
+              data: {
+                userId,
+                houseId: ownedFlock.houseId,
+                flockId: ownedFlock.id,
+                breedId: ownedFlock.breedId,
+                customerId: customerId ? Number(customerId) : null,
+                category: "Bird sales",
+                amount: payState.amount,
+                date: new Date(date),
+                description: notes ? notes.trim() : `Bird sale: ${numQuantity} birds from flock ${ownedFlock.name}`,
+                quantity: numQuantity,
+                unit: "birds",
+                unitPrice: numUnitPrice,
+                amountPaid: payState.amountPaid,
+                amountDue: payState.amountDue,
+                paymentStatus: payState.paymentStatus,
+              },
+            });
+            resolvedIncomeId = createdIncome.id;
+          }
+        }
+
         const created = await tx.depopulationEvent.create({
           data: {
             userId,
@@ -159,11 +226,23 @@ const createDepopulationEvent = async (req, res, next) => {
             reason,
             date: new Date(date),
             notes: notes ? notes.trim() : null,
-            incomeId: incomeId ? Number(incomeId) : null,
+            incomeId: resolvedIncomeId,
           },
           include: {
             flock: { select: { id: true, name: true, batchNumber: true } },
-            income: { select: { id: true, amount: true, category: true } },
+            income: {
+              select: {
+                id: true,
+                amount: true,
+                category: true,
+                customerId: true,
+                unitPrice: true,
+                amountPaid: true,
+                amountDue: true,
+                paymentStatus: true,
+                customer: { select: { id: true, name: true, phone: true } },
+              },
+            },
           },
         });
 
@@ -179,13 +258,17 @@ const createDepopulationEvent = async (req, res, next) => {
       event = result.created;
       liveBirdsAfter = result.liveBirdsAfter;
     } catch (error) {
-      if (error.code === "FLOCK_NOT_FOUND" || error.code === "INCOME_NOT_FOUND") {
+      if (
+        error.code === "FLOCK_NOT_FOUND" ||
+        error.code === "INCOME_NOT_FOUND" ||
+        error.code === "CUSTOMER_NOT_FOUND"
+      ) {
         return res.status(404).json({
           success: false,
           message: error.message,
         });
       }
-      if (error.code === "NO_HEADROOM") {
+      if (error.code === "NO_HEADROOM" || error.code === "FLOCK_NOT_ACTIVE") {
         return res.status(400).json({
           success: false,
           message: error.message,
@@ -241,7 +324,19 @@ const getDepopulationEvents = async (req, res, next) => {
       where,
       include: {
         flock: { select: { id: true, name: true, batchNumber: true } },
-        income: { select: { id: true, amount: true, category: true } },
+        income: {
+          select: {
+            id: true,
+            amount: true,
+            category: true,
+            customerId: true,
+            unitPrice: true,
+            amountPaid: true,
+            amountDue: true,
+            paymentStatus: true,
+            customer: { select: { id: true, name: true, phone: true } },
+          },
+        },
       },
       orderBy: { date: "desc" },
     });
@@ -280,7 +375,19 @@ const getDepopulationEventById = async (req, res, next) => {
       },
       include: {
         flock: { select: { id: true, name: true, batchNumber: true } },
-        income: { select: { id: true, amount: true, category: true } },
+        income: {
+          select: {
+            id: true,
+            amount: true,
+            category: true,
+            customerId: true,
+            unitPrice: true,
+            amountPaid: true,
+            amountDue: true,
+            paymentStatus: true,
+            customer: { select: { id: true, name: true, phone: true } },
+          },
+        },
       },
     });
 
@@ -308,11 +415,23 @@ const updateDepopulationEvent = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const eventId = Number(req.params.id);
-    const { quantity, reason, date, notes, incomeId } = req.body;
+    const {
+      quantity,
+      reason,
+      date,
+      notes,
+      incomeId,
+      unitPrice,
+      amount,
+      customerId,
+      amountPaid,
+      paymentStatus,
+    } = req.body;
 
     // Verify event ownership
     const existing = await prisma.depopulationEvent.findFirst({
       where: { id: eventId, userId },
+      include: { income: true },
     });
 
     if (!existing) {
@@ -333,6 +452,8 @@ const updateDepopulationEvent = async (req, res, next) => {
         message: "Quantity must be greater than 0",
       });
     }
+
+    const targetReason = reason !== undefined ? reason : existing.reason;
 
     let updated;
     let liveBirdsAfter;
@@ -359,6 +480,18 @@ const updateDepopulationEvent = async (req, res, next) => {
           }
         }
 
+        // If customerId is provided, verify it belongs to this user
+        if (customerId) {
+          const customer = await tx.customer.findFirst({
+            where: { id: Number(customerId), userId },
+          });
+          if (!customer) {
+            const error = new Error("Customer not found or does not belong to your farm");
+            error.code = "CUSTOMER_NOT_FOUND";
+            throw error;
+          }
+        }
+
         // If incomeId is provided, verify it belongs to this user
         if (incomeId) {
           const income = await tx.income.findFirst({
@@ -371,18 +504,168 @@ const updateDepopulationEvent = async (req, res, next) => {
           }
         }
 
+        let resolvedIncomeId =
+          incomeId !== undefined ? (incomeId ? Number(incomeId) : null) : existing.incomeId;
+
+        // Transition handling:
+        if (targetReason === "SOLD") {
+          if (resolvedIncomeId) {
+            // Update linked Income if exists and belongs to this user
+            const linkedIncome = await tx.income.findFirst({
+              where: { id: resolvedIncomeId, userId },
+            });
+            if (linkedIncome) {
+              const effectiveQty = newQuantity;
+              let effectiveUnitPrice =
+                unitPrice !== undefined
+                  ? unitPrice !== null && unitPrice !== ""
+                    ? Number(unitPrice)
+                    : null
+                  : linkedIncome.unitPrice
+                  ? Number(linkedIncome.unitPrice)
+                  : null;
+
+              let effectiveAmount =
+                amount !== undefined && amount !== null && amount !== "" ? Number(amount) : null;
+              if (effectiveAmount === null) {
+                if (effectiveUnitPrice !== null) {
+                  effectiveAmount = Number((effectiveQty * effectiveUnitPrice).toFixed(2));
+                } else if (quantity !== undefined && newQuantity !== existing.quantity && existing.quantity > 0) {
+                  // Adjust amount proportionally to quantity
+                  const unitRate = Number(linkedIncome.amount) / existing.quantity;
+                  effectiveAmount = Number((effectiveQty * unitRate).toFixed(2));
+                } else {
+                  effectiveAmount = Number(linkedIncome.amount);
+                }
+              }
+
+              const wasFullyPaid =
+                Number(linkedIncome.amountDue || 0) === 0 ||
+                Number(linkedIncome.amountPaid || 0) >= Number(linkedIncome.amount);
+              const effectivePaid =
+                amountPaid !== undefined && amountPaid !== null && amountPaid !== ""
+                  ? Math.min(Number(amountPaid), effectiveAmount)
+                  : wasFullyPaid
+                  ? effectiveAmount
+                  : Math.min(Number(linkedIncome.amountPaid || 0), effectiveAmount);
+
+              const payState = computePaymentState(
+                effectiveAmount,
+                effectivePaid,
+                paymentStatus || linkedIncome.paymentStatus
+              );
+              const targetCustomerId =
+                customerId !== undefined
+                  ? customerId
+                    ? Number(customerId)
+                    : null
+                  : linkedIncome.customerId;
+
+              await tx.income.update({
+                where: { id: linkedIncome.id },
+                data: {
+                  amount: payState.amount,
+                  quantity: effectiveQty,
+                  unitPrice: effectiveUnitPrice,
+                  amountPaid: payState.amountPaid,
+                  amountDue: payState.amountDue,
+                  paymentStatus: payState.paymentStatus,
+                  customerId: targetCustomerId,
+                  date: date ? new Date(date) : linkedIncome.date,
+                  description:
+                    notes !== undefined
+                      ? notes
+                        ? notes.trim()
+                        : null
+                      : linkedIncome.description,
+                },
+              });
+            }
+          } else {
+            // Event was non-SOLD or didn't have incomeId, now it is SOLD: check if sale info provided to create Income
+            let finalAmount =
+              amount !== undefined && amount !== null && amount !== "" ? Number(amount) : null;
+            if (finalAmount === null && unitPrice !== undefined && unitPrice !== null && unitPrice !== "") {
+              finalAmount = Number((newQuantity * Number(unitPrice)).toFixed(2));
+            }
+
+            if (finalAmount !== null && finalAmount > 0) {
+              const payState = computePaymentState(finalAmount, amountPaid, paymentStatus);
+              const numUnitPrice =
+                unitPrice !== undefined && unitPrice !== null && unitPrice !== ""
+                  ? Number(unitPrice)
+                  : Number((payState.amount / newQuantity).toFixed(2));
+
+              const createdIncome = await tx.income.create({
+                data: {
+                  userId,
+                  houseId: ownedFlock.houseId,
+                  flockId: ownedFlock.id,
+                  breedId: ownedFlock.breedId,
+                  customerId: customerId ? Number(customerId) : null,
+                  category: "Bird sales",
+                  amount: payState.amount,
+                  date: date ? new Date(date) : existing.date,
+                  description: notes
+                    ? notes.trim()
+                    : `Bird sale: ${newQuantity} birds from flock ${ownedFlock.name}`,
+                  quantity: newQuantity,
+                  unit: "birds",
+                  unitPrice: numUnitPrice,
+                  amountPaid: payState.amountPaid,
+                  amountDue: payState.amountDue,
+                  paymentStatus: payState.paymentStatus,
+                },
+              });
+              resolvedIncomeId = createdIncome.id;
+            }
+          }
+        } else {
+          // Reason changed from SOLD to non-SOLD: clean up linked Income if any
+          if (existing.incomeId) {
+            const otherEvents = await tx.depopulationEvent.count({
+              where: { incomeId: existing.incomeId, id: { not: eventId } },
+            });
+            if (otherEvents === 0) {
+              // Only delete the linked Income when it belongs to this user;
+              // otherwise just unlink so no foreign record is removed.
+              const ownedIncome = await tx.income.findFirst({
+                where: { id: existing.incomeId, userId },
+              });
+              if (ownedIncome) {
+                await tx.income.delete({
+                  where: { id: existing.incomeId },
+                });
+              }
+            }
+            resolvedIncomeId = null;
+          }
+        }
+
         const saved = await tx.depopulationEvent.update({
           where: { id: eventId },
           data: {
             quantity: newQuantity,
-            reason: reason !== undefined ? reason : existing.reason,
+            reason: targetReason,
             date: date ? new Date(date) : existing.date,
             notes: notes !== undefined ? (notes ? notes.trim() : null) : existing.notes,
-            incomeId: incomeId !== undefined ? (incomeId ? Number(incomeId) : null) : existing.incomeId,
+            incomeId: resolvedIncomeId,
           },
           include: {
             flock: { select: { id: true, name: true, batchNumber: true } },
-            income: { select: { id: true, amount: true, category: true } },
+            income: {
+              select: {
+                id: true,
+                amount: true,
+                category: true,
+                customerId: true,
+                unitPrice: true,
+                amountPaid: true,
+                amountDue: true,
+                paymentStatus: true,
+                customer: { select: { id: true, name: true, phone: true } },
+              },
+            },
           },
         });
 
@@ -398,7 +681,11 @@ const updateDepopulationEvent = async (req, res, next) => {
       updated = result.saved;
       liveBirdsAfter = result.liveBirdsAfter;
     } catch (error) {
-      if (error.code === "FLOCK_NOT_FOUND" || error.code === "INCOME_NOT_FOUND") {
+      if (
+        error.code === "FLOCK_NOT_FOUND" ||
+        error.code === "INCOME_NOT_FOUND" ||
+        error.code === "CUSTOMER_NOT_FOUND"
+      ) {
         return res.status(404).json({
           success: false,
           message: error.message,
@@ -428,6 +715,7 @@ const updateDepopulationEvent = async (req, res, next) => {
 
 /**
  * Deletes a depopulation event and restores the flock's bird count.
+ * Also cleans up linked Income if no other depopulation event references it.
  * Enforces authenticated user ownership.
  */
 const deleteDepopulationEvent = async (req, res, next) => {
@@ -449,6 +737,24 @@ const deleteDepopulationEvent = async (req, res, next) => {
     const flockId = existing.flockId;
 
     const { liveBirdsAfter } = await runSerializable(async (tx) => {
+      // If linked to an income record, delete that income if no other depopulation event references it
+      if (existing.incomeId) {
+        const otherEvents = await tx.depopulationEvent.count({
+          where: { incomeId: existing.incomeId, id: { not: eventId } },
+        });
+        if (otherEvents === 0) {
+          // Only delete when the linked Income belongs to this user.
+          const ownedIncome = await tx.income.findFirst({
+            where: { id: existing.incomeId, userId },
+          });
+          if (ownedIncome) {
+            await tx.income.delete({
+              where: { id: existing.incomeId },
+            });
+          }
+        }
+      }
+
       await tx.depopulationEvent.delete({
         where: { id: eventId },
       });

@@ -6,6 +6,7 @@ const {
   getAdjustmentMaps,
   sumCorrectedMortality,
 } = require("../services/correction.service");
+const { applyEggStockChange } = require("../services/egg-inventory.service");
 
 /**
  * Creates an append-only correction for an immutable DailyRecord.
@@ -148,6 +149,24 @@ const createCorrection = async (req, res, next) => {
         include: { user: { select: { id: true, name: true } } },
       });
 
+      // Phase 4.2 — EGGS corrections move egg stock by exactly the
+      // correction delta, tied to the correction row via the database
+      // unique correctionId (idempotent per correction). dailyRecordId
+      // stays null so repeated corrections of one record never collide.
+      if (field === "EGGS" && adjustment !== 0) {
+        await applyEggStockChange(tx, {
+          userId,
+          delta: Math.trunc(adjustment),
+          type: "CORRECTION",
+          houseId: record.houseId,
+          flockId: record.flockId,
+          dailyRecordId: null,
+          correctionId: correction.id,
+          date: record.date,
+          reason: `Egg correction for record #${record.id} (${adjustment > 0 ? "+" : ""}${Math.trunc(adjustment)} eggs): ${reason.trim()}`,
+        });
+      }
+
       // Keep the stored flock counter consistent with corrected mortality.
       if (field === "MORTALITY" && affectedFlockId) {
         const flock = await tx.flock.findUnique({
@@ -193,7 +212,8 @@ const createCorrection = async (req, res, next) => {
     if (
       error.code === "STILL_EDITABLE" ||
       error.code === "NO_CHANGE" ||
-      error.code === "TIMELINE_CONFLICT"
+      error.code === "TIMELINE_CONFLICT" ||
+      error.code === "NEGATIVE_EGG_STOCK"
     ) {
       return res.status(400).json({ success: false, message: error.message });
     }

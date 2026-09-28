@@ -11,7 +11,7 @@ import { exportToCsv } from "../utils/exportCsv";
 
 function DailyRecordsPage() {
   const navigate = useNavigate();
-  const { records, flocks, selectedHouse, setConfirmDialog, reloadHouseData, notifyFeedInventoryChanged, showToast } = useFarm();
+  const { records, flocks, selectedHouse, setConfirmDialog, reloadHouseData, notifyFeedInventoryChanged, notifyEggInventoryChanged, showToast } = useFarm();
 
   const [dateFilter, setDateFilter] = useState("");
   const [flockFilter, setFlockFilter] = useState("ALL");
@@ -22,6 +22,7 @@ function DailyRecordsPage() {
     setCorrectingRecord(null);
     await reloadHouseData();
     if (notifyFeedInventoryChanged) notifyFeedInventoryChanged();
+    if (notifyEggInventoryChanged) notifyEggInventoryChanged();
     showToast("Correction recorded. Original entry unchanged.");
   };
 

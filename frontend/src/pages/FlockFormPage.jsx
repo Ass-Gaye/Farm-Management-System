@@ -119,9 +119,13 @@ function FlockFormPage() {
         ? new Date(formData.expectedMarketDate).toISOString()
         : null,
       targetWeightKg: formData.targetWeightKg ? Number(formData.targetWeightKg) : null,
-      status: formData.status,
       notes: formData.notes.trim() || null,
     };
+    // Phase 4.4 — lifecycle status changes go through the closeout
+    // flow (flock detail page), never through this form.
+    if (!isEditing) {
+      payload.status = "ACTIVE";
+    }
 
     try {
       setSaving(true);
@@ -161,7 +165,7 @@ function FlockFormPage() {
       title={isEditing ? "Edit Flock / Batch" : "New Flock / Batch"}
       subtitle={
         isEditing
-          ? "Update batch parameters, status, target weight, or notes."
+          ? "Update batch parameters, target weight, or notes."
           : "Register a biological bird batch for growth tracking and performance analysis."
       }
       backPath="/flocks"
@@ -312,18 +316,24 @@ function FlockFormPage() {
 
           <div className="form-group">
             <label htmlFor="status">Batch Lifecycle Status</label>
-            <select
-              id="status"
-              name="status"
-              value={formData.status}
-              onChange={handleChange}
-            >
-              <option value="ACTIVE">Active (Currently in house)</option>
-              <option value="COMPLETED">Completed (Production finished)</option>
-              <option value="SOLD">Sold (Marketed)</option>
-              <option value="SLAUGHTERED">Slaughtered / Harvested</option>
-              <option value="ARCHIVED">Archived</option>
-            </select>
+            {isEditing ? (
+              <>
+                <input id="status" type="text" value={formData.status} disabled readOnly />
+                <span style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                  Status changes (close / reopen) are handled on the flock detail page so the final summary is reconciled first.
+                </span>
+              </>
+            ) : (
+              <select
+                id="status"
+                name="status"
+                value={formData.status}
+                onChange={handleChange}
+                disabled
+              >
+                <option value="ACTIVE">Active (Currently in house)</option>
+              </select>
+            )}
           </div>
         </div>
 

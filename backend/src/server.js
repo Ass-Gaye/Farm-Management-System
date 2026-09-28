@@ -29,6 +29,7 @@ const inventoryRoutes = require("./routes/inventory.routes");
 const flockRoutes = require("./routes/flock.routes");
 const vaccinationRoutes = require("./routes/vaccination.routes");
 const depopulationRoutes = require("./routes/depopulation.routes");
+const eggRoutes = require("./routes/egg.routes");
 const { authenticate } = require("./middleware/auth.middleware");
 const {
   getFinancialSummary,
@@ -99,6 +100,7 @@ const createApp = () => {
   app.use("/api/vaccinations", vaccinationRoutes);
   app.use("/api/depopulation-events", depopulationRoutes);
   app.use("/api/flocks/:flockId/depopulation-events", depopulationRoutes);
+  app.use("/api/eggs", eggRoutes);
 
   // Financial route aliases (canonical: /api/finances/*; kept for backward compatibility)
   app.get("/api/financial-summary", authenticate, getFinancialSummary);

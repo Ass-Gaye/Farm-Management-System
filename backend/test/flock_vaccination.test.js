@@ -138,16 +138,14 @@ test("Flock, DailyRecord, and Vaccination integration workflow", async () => {
   });
   assert.equal(unauthFlockRes.status, 404);
 
-  // 5. Mark Flock 1 as COMPLETED
-  const updateFlock1Res = await request(`/api/flocks/${flock1Id}`, {
-    method: "PUT",
+  // 5. Phase 4.4: lifecycle transitions go through the closeout
+  // endpoint. The flock stays ACTIVE while it receives records below;
+  // it is closed at the end of this workflow instead.
+  const stillActiveRes = await request(`/api/flocks/${flock1Id}`, {
     headers: authHeaders,
-    body: JSON.stringify({
-      status: "COMPLETED",
-    }),
   });
-  assert.equal(updateFlock1Res.status, 200);
-  assert.equal(updateFlock1Res.body.data.status, "COMPLETED");
+  assert.equal(stillActiveRes.status, 200);
+  assert.equal(stillActiveRes.body.data.status, "ACTIVE");
 
   // 6. Add Daily Record to Flock 1
   const daily1Res = await request("/api/daily-records", {
@@ -267,4 +265,27 @@ test("Flock, DailyRecord, and Vaccination integration workflow", async () => {
 
   const flock1Restored = await request(`/api/flocks/${flock1Id}`, { headers: authHeaders });
   assert.equal(flock1Restored.body.data.currentBirds, 500); // Restored back from 490 to 500!
+
+  // 12. Close Flock 1 through the lifecycle endpoint (replaces the old
+  // direct status edit; 500 live birds remain so acknowledgment is required).
+  const closeoutRes = await request(`/api/flocks/${flock1Id}/closeout`, {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({
+      status: "COMPLETED",
+      acknowledgeRemainingBirds: true,
+      notes: "Batch finished in test",
+    }),
+  });
+  assert.equal(closeoutRes.status, 200);
+  assert.equal(closeoutRes.body.data.status, "COMPLETED");
+  assert.equal(closeoutRes.body.data.birds.liveBirds, 500);
+
+  // Direct status edits are rejected: lifecycle goes through closeout.
+  const directStatusRes = await request(`/api/flocks/${flock2Id}`, {
+    method: "PUT",
+    headers: authHeaders,
+    body: JSON.stringify({ status: "COMPLETED" }),
+  });
+  assert.equal(directStatusRes.status, 400);
 });

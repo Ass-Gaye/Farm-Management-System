@@ -73,6 +73,9 @@ model User {
   inventoryMovements InventoryMovement[]
   depopulationEvents DepopulationEvent[]
   dailyRecordCorrections DailyRecordCorrection[]
+  eggInventory EggInventory?
+  eggMovements EggMovement[]
+  eggSales EggSale[]
 
   @@map("users")
 }
@@ -92,6 +95,8 @@ model PoultryHouse {
   expenses       Expense[]
   income         Income[]
   inventoryMovements InventoryMovement[]
+  eggSales       EggSale[]
+  eggMovements   EggMovement[]
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -115,6 +120,7 @@ model DailyRecord {
   flock         Flock?       @relation(fields: [flockId], references: [id], onDelete: SetNull)
   feedType      FeedType?    @relation(fields: [feedTypeId], references: [id], onDelete: SetNull)
   inventoryMovements InventoryMovement[]
+  eggMovements EggMovement[]
   corrections   DailyRecordCorrection[]
 
   // The API treats one record per house and date as the daily grain.
@@ -140,6 +146,7 @@ model DailyRecordCorrection {
 
   user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   dailyRecord  DailyRecord @relation(fields: [dailyRecordId], references: [id], onDelete: Cascade)
+  eggMovements EggMovement[]
 
   @@index([dailyRecordId])
   @@index([userId])
@@ -223,6 +230,7 @@ model Customer {
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   sales     Income[]
+  eggSales  EggSale[]
 
   @@index([userId])
   @@map("customers")
@@ -311,6 +319,7 @@ model Income {
   breed         Breed?        @relation(fields: [breedId], references: [id], onDelete: SetNull)
   customer      Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
   depopulationEvents DepopulationEvent[]
+  eggSales EggSale[]
 
   @@index([userId, date])
   @@index([houseId])
@@ -402,6 +411,8 @@ model Flock {
   expenses            Expense[]
   income              Income[]
   depopulationEvents  DepopulationEvent[]
+  eggSales            EggSale[]
+  eggMovements        EggMovement[]
 
   @@index([userId])
   @@index([houseId])
@@ -455,4 +466,83 @@ model DepopulationEvent {
   @@index([flockId])
   @@index([incomeId])
   @@map("depopulation_events")
+}
+
+// Phase 4.2 — Egg inventory (pieces). EggInventory.currentStock is the
+// authoritative cached stock; EggMovement is the append-only audit ledger
+// with a per-row balanceAfter snapshot (same pattern as feed inventory).
+// One row per user: egg stock is shared farm stock, like feed stock.
+model EggInventory {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @unique
+  currentStock Int      @default(0)
+  unit         String   @default("pieces")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("egg_inventory")
+}
+
+// Phase 4.2 — Egg sale (physical removal, mirrors DepopulationEvent).
+// Quantity is a count of eggs/pieces; unitPrice is GMD price per egg.
+// The linked Income (category "Egg sales") is the financial record.
+model EggSale {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  houseId     Int?
+  flockId     Int?
+  customerId  Int?
+  incomeId    Int?
+  quantity    Int
+  unitPrice   Decimal?  @db.Decimal(12, 2)
+  date        DateTime
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  house       PoultryHouse? @relation(fields: [houseId], references: [id], onDelete: SetNull)
+  flock       Flock?        @relation(fields: [flockId], references: [id], onDelete: SetNull)
+  customer    Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  income      Income?       @relation(fields: [incomeId], references: [id], onDelete: SetNull)
+  movements   EggMovement[]
+
+  @@index([userId])
+  @@index([incomeId])
+  @@map("egg_sales")
+}
+
+model EggMovement {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  houseId       Int?
+  flockId       Int?
+  dailyRecordId Int?
+  eggSaleId     Int?
+  correctionId  Int?      @unique
+  type          String    // PRODUCTION, SALE, ADJUSTMENT, WASTAGE, RETURN, CORRECTION
+  quantity      Int       // signed: +production/return, -sale/wastage
+  unit          String    @default("pieces")
+  balanceAfter  Int
+  date          DateTime
+  reason        String?
+  createdAt     DateTime  @default(now())
+
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  house         PoultryHouse? @relation(fields: [houseId], references: [id], onDelete: SetNull)
+  flock         Flock?        @relation(fields: [flockId], references: [id], onDelete: SetNull)
+  dailyRecord   DailyRecord?  @relation(fields: [dailyRecordId], references: [id], onDelete: SetNull)
+  eggSale       EggSale?      @relation(fields: [eggSaleId], references: [id], onDelete: Cascade)
+  correction    DailyRecordCorrection? @relation(fields: [correctionId], references: [id], onDelete: Cascade)
+
+  // Duplicate protection: exactly one PRODUCTION movement per daily
+  // record, one SALE movement per egg sale, and one CORRECTION movement
+  // per correction, enforced by the database.
+  @@unique([dailyRecordId, type])
+  @@unique([eggSaleId])
+  @@index([userId])
+  @@index([type])
+  @@map("egg_movements")
 }

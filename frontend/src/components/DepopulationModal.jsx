@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { createDepopulationEvent, updateDepopulationEvent } from "../services/api";
+import { createDepopulationEvent, updateDepopulationEvent, getCustomers } from "../services/api";
 import FullScreenFormLayout from "./common/FullScreenFormLayout";
 
 const REASONS = [
@@ -26,10 +26,25 @@ function DepopulationModal({
     reason: "SOLD",
     date: new Date().toISOString().split("T")[0],
     notes: "",
+    customerId: "",
+    unitPrice: "",
+    amount: "",
+    amountPaid: "",
   });
 
+  const [customers, setCustomers] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      getCustomers({ active: true })
+        .then((res) => {
+          if (res?.data) setCustomers(res.data);
+        })
+        .catch(() => {});
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (event) {
@@ -41,6 +56,21 @@ function DepopulationModal({
           ? new Date(event.date).toISOString().split("T")[0]
           : new Date().toISOString().split("T")[0],
         notes: event.notes || "",
+        customerId: event.income?.customerId ? String(event.income.customerId) : "",
+        unitPrice:
+          event.income?.unitPrice !== undefined && event.income?.unitPrice !== null
+            ? String(event.income.unitPrice)
+            : "",
+        amount:
+          event.income?.amount !== undefined && event.income?.amount !== null
+            ? String(event.income.amount)
+            : "",
+        amountPaid:
+          event.income?.amountPaid !== undefined && event.income?.amountPaid !== null
+            ? String(event.income.amountPaid)
+            : event.income?.amount !== undefined && event.income?.amount !== null
+            ? String(event.income.amount)
+            : "",
       });
     } else {
       setFormData({
@@ -49,6 +79,10 @@ function DepopulationModal({
         reason: "SOLD",
         date: new Date().toISOString().split("T")[0],
         notes: "",
+        customerId: "",
+        unitPrice: "",
+        amount: "",
+        amountPaid: "",
       });
     }
     setError("");
@@ -66,6 +100,20 @@ function DepopulationModal({
 
   const enteredQty = Number(formData.quantity) || 0;
   const liveAfter = Math.max(0, maxAvailable - enteredQty);
+
+  const totalAmount = parseFloat(formData.amount) || 0;
+  const paidAmount =
+    formData.amountPaid === "" ? totalAmount : parseFloat(formData.amountPaid) || 0;
+  const balanceDue = Math.max(0, Number((totalAmount - paidAmount).toFixed(2)));
+
+  let derivedStatus = "PAID";
+  if (balanceDue === 0 || paidAmount >= totalAmount) {
+    derivedStatus = "PAID";
+  } else if (paidAmount > 0 && paidAmount < totalAmount) {
+    derivedStatus = "PARTIALLY_PAID";
+  } else {
+    derivedStatus = "UNPAID";
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -93,6 +141,17 @@ function DepopulationModal({
       return;
     }
 
+    if (formData.reason === "SOLD") {
+      if (paidAmount < 0) {
+        setError("Amount paid cannot be negative.");
+        return;
+      }
+      if (paidAmount > totalAmount && totalAmount > 0) {
+        setError("Amount paid cannot exceed total sale amount.");
+        return;
+      }
+    }
+
     try {
       setSaving(true);
       const payload = {
@@ -101,6 +160,15 @@ function DepopulationModal({
         reason: formData.reason,
         date: new Date(formData.date).toISOString(),
         notes: formData.notes.trim() || null,
+        ...(formData.reason === "SOLD"
+          ? {
+              unitPrice: formData.unitPrice !== "" ? parseFloat(formData.unitPrice) : null,
+              amount: formData.amount !== "" ? parseFloat(formData.amount) : null,
+              customerId: formData.customerId ? Number(formData.customerId) : null,
+              amountPaid: formData.amountPaid !== "" ? parseFloat(formData.amountPaid) : undefined,
+              paymentStatus: derivedStatus,
+            }
+          : {}),
       };
 
       if (isEditing) {
@@ -214,7 +282,20 @@ function DepopulationModal({
                 max={maxAvailable > 0 ? maxAvailable : 1}
                 placeholder="e.g. 100"
                 value={formData.quantity}
-                onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                onChange={(e) => {
+                  const newQty = e.target.value;
+                  const q = Number(newQty) || 0;
+                  const p = parseFloat(formData.unitPrice);
+                  const next = { ...formData, quantity: newQty };
+                  if (!isNaN(p) && p >= 0 && q > 0) {
+                    const calcTotal = Number((q * p).toFixed(2));
+                    next.amount = String(calcTotal);
+                    if (!formData.amountPaid || formData.amountPaid === formData.amount) {
+                      next.amountPaid = String(calcTotal);
+                    }
+                  }
+                  setFormData(next);
+                }}
                 required
               />
               {maxAvailable > 0 && enteredQty > 0 && (
@@ -244,6 +325,181 @@ function DepopulationModal({
               />
             </div>
           </div>
+
+          {/* Bird Sale Financial Integration Section */}
+          {formData.reason === "SOLD" && (
+            <div
+              style={{
+                background: "var(--bg-surface-muted, #f8fafc)",
+                padding: 14,
+                borderRadius: 6,
+                marginBottom: 16,
+                border: "1px solid var(--border-subtle, #e2e8f0)",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "var(--text-secondary, #475569)",
+                  marginBottom: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span>💰</span> Bird Sale Financial Details (Automatic Income Sync)
+              </div>
+
+              {/* Customer Selector */}
+              <div className="form-group" style={{ marginBottom: 12 }}>
+                <label htmlFor="depop-customer" style={{ fontSize: 12 }}>
+                  Customer / Buyer (Optional)
+                </label>
+                <select
+                  id="depop-customer"
+                  value={formData.customerId}
+                  onChange={(e) => setFormData({ ...formData, customerId: e.target.value })}
+                >
+                  <option value="">Cash / Walk-in Buyer (No customer profile)</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.phone ? `(${c.phone})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Unit Price & Total Sale Grid */}
+              <div className="form-row" style={{ marginBottom: 12 }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="depop-unit-price" style={{ fontSize: 12 }}>
+                    Price per Bird (GMD)
+                  </label>
+                  <input
+                    id="depop-unit-price"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="e.g. 350"
+                    value={formData.unitPrice}
+                    onChange={(e) => {
+                      const newPrice = e.target.value;
+                      const p = parseFloat(newPrice);
+                      const q = enteredQty;
+                      const next = { ...formData, unitPrice: newPrice };
+                      if (!isNaN(p) && p >= 0 && q > 0) {
+                        const calcTotal = Number((q * p).toFixed(2));
+                        next.amount = String(calcTotal);
+                        if (!formData.amountPaid || formData.amountPaid === formData.amount) {
+                          next.amountPaid = String(calcTotal);
+                        }
+                      }
+                      setFormData(next);
+                    }}
+                  />
+                </div>
+
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="depop-amount" style={{ fontSize: 12 }}>
+                    Total Sale Value (GMD)
+                  </label>
+                  <input
+                    id="depop-amount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    value={formData.amount}
+                    onChange={(e) => {
+                      const newAmount = e.target.value;
+                      const next = { ...formData, amount: newAmount };
+                      if (!formData.amountPaid || formData.amountPaid === formData.amount) {
+                        next.amountPaid = newAmount;
+                      }
+                      setFormData(next);
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Amount Paid & Payment Status */}
+              <div className="form-row">
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="depop-amount-paid" style={{ fontSize: 12 }}>
+                    Amount Received (GMD)
+                  </label>
+                  <input
+                    id="depop-amount-paid"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max={totalAmount > 0 ? totalAmount : undefined}
+                    placeholder={formData.amount || "0.00"}
+                    value={formData.amountPaid}
+                    onChange={(e) => setFormData({ ...formData, amountPaid: e.target.value })}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "center",
+                    padding: "8px 12px",
+                    borderRadius: 4,
+                    background:
+                      derivedStatus === "PAID"
+                        ? "#f0fdf4"
+                        : derivedStatus === "PARTIALLY_PAID"
+                        ? "#fffbeb"
+                        : "#fef2f2",
+                    border: `1px solid ${
+                      derivedStatus === "PAID"
+                        ? "#bbf7d0"
+                        : derivedStatus === "PARTIALLY_PAID"
+                        ? "#fde68a"
+                        : "#fecaca"
+                    }`,
+                    fontSize: 12,
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                    <span>Balance Due:</span>
+                    <strong style={{ color: balanceDue > 0 ? "#dc2626" : "#16a34a" }}>
+                      {balanceDue.toFixed(2)} GMD
+                    </strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Status:</span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "2px 6px",
+                        borderRadius: 3,
+                        background:
+                          derivedStatus === "PAID"
+                            ? "#dcfce7"
+                            : derivedStatus === "PARTIALLY_PAID"
+                            ? "#fef3c7"
+                            : "#fee2e2",
+                        color:
+                          derivedStatus === "PAID"
+                            ? "#15803d"
+                            : derivedStatus === "PARTIALLY_PAID"
+                            ? "#b45309"
+                            : "#b91c1c",
+                      }}
+                    >
+                      {derivedStatus}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Notes */}
           <div className="form-group">

@@ -375,6 +375,15 @@ function FlocksPage() {
                               type="button"
                               className="secondary-button"
                               style={{ padding: "4px 8px", fontSize: 11 }}
+                              title="View performance, trends and financials"
+                              onClick={() => navigate(`/flocks/${flock.id}`)}
+                            >
+                              📊 Details
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              style={{ padding: "4px 8px", fontSize: 11 }}
                               title="Record bird sales, harvest, or culls"
                               onClick={() => navigate(`/depopulation?flockId=${flock.id}`)}
                             >

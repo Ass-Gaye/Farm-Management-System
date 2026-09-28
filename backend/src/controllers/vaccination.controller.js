@@ -126,6 +126,14 @@ const createVaccination = async (req, res, next) => {
       });
     }
 
+    // Phase 4.4 — closed flocks reject new operational records.
+    if (flock.status !== "ACTIVE") {
+      return res.status(400).json({
+        success: false,
+        message: `This flock ("${flock.name}") is closed and cannot receive new operational records. Reopen the flock first.`,
+      });
+    }
+
     const vaccination = await prisma.vaccination.create({
       data: {
         userId,
@@ -172,6 +180,14 @@ const applyVaccinationTemplate = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: "Flock not found or does not belong to your farm",
+      });
+    }
+
+    // Phase 4.4 — closed flocks reject new operational records.
+    if (flock.status !== "ACTIVE") {
+      return res.status(400).json({
+        success: false,
+        message: `This flock ("${flock.name}") is closed and cannot receive new operational records. Reopen the flock first.`,
       });
     }
 

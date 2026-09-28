@@ -75,6 +75,12 @@ function PageNavigation() {
       badge: null,
     },
     {
+      to: "/eggs",
+      label: "Eggs",
+      icon: <InventoryIcon size={15} />,
+      badge: null,
+    },
+    {
       to: "/finances",
       label: "Financials",
       icon: <FinanceIcon size={15} />,

@@ -13,7 +13,7 @@ function DailyRecordFormPage() {
   const { id } = useParams();
   const isEditing = Boolean(id);
   const navigate = useNavigate();
-  const { selectedHouse, records, flocks, reloadHouseData, notifyFeedInventoryChanged, showToast } = useFarm();
+  const { selectedHouse, records, flocks, reloadHouseData, notifyFeedInventoryChanged, notifyEggInventoryChanged, showToast } = useFarm();
 
   const existingRecord = isEditing
     ? records.find((r) => r.id === Number(id))
@@ -237,6 +237,7 @@ function DailyRecordFormPage() {
 
       await reloadHouseData();
       notifyFeedInventoryChanged();
+      if (notifyEggInventoryChanged) notifyEggInventoryChanged();
       const savedFlock = scope === "FLOCK"
         ? houseFlocks.find((f) => String(f.id) === String(formData.flockId))
         : null;
@@ -248,6 +249,7 @@ function DailyRecordFormPage() {
         mortality: mortalityNum,
         eggsCollected: eggsNum,
         inventory: result?.inventory || null,
+        eggInventory: result?.eggInventory || null,
         feedUsedKg: feedNum,
       });
     } catch (err) {
@@ -333,6 +335,18 @@ function DailyRecordFormPage() {
               No feed type was linked, so no stock was deducted.
             </div>
           )}
+
+          {successSummary.eggInventory ? (
+            <div style={{ padding: "12px 14px", borderRadius: 8, marginBottom: 16, fontSize: 13, background: "#fefce8", border: "1px solid #fde68a" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>🥚 Egg Stock</div>
+              <div>
+                {successSummary.eggInventory.stockBefore} → {successSummary.eggInventory.stockAfter} eggs
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "#92400e" }}>
+                ✓ {successSummary.eggInventory.collectedEggs} eggs automatically added to egg stock
+              </div>
+            </div>
+          ) : null}
 
           <div className="form-actions">
             {!isEditing && (

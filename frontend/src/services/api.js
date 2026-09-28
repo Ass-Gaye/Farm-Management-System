@@ -552,6 +552,10 @@ export const getFlockById = async (id) => {
   return request(`/flocks/${id}`);
 };
 
+export const getFlockTrends = async (id, range = "30d") => {
+  return request(`/flocks/${id}/trends?range=${encodeURIComponent(range)}`);
+};
+
 export const createFlock = async (flockData) => {
   return request("/flocks", {
     method: "POST",
@@ -563,6 +567,13 @@ export const updateFlock = async (id, flockData) => {
   return request(`/flocks/${id}`, {
     method: "PUT",
     body: JSON.stringify(flockData),
+  });
+};
+
+export const closeoutFlock = async (id, closeoutData) => {
+  return request(`/flocks/${id}/closeout`, {
+    method: "POST",
+    body: JSON.stringify(closeoutData),
   });
 };
 
@@ -645,6 +656,65 @@ export const updateDepopulationEvent = async (id, data) => {
 
 export const deleteDepopulationEvent = async (id) => {
   return request(`/depopulation-events/${id}`, {
+    method: "DELETE",
+  });
+};
+
+// ==================== Egg Inventory & Sales (pieces) ====================
+
+export const getEggInventory = async () => {
+  return request("/eggs/inventory");
+};
+
+export const getEggMovements = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/eggs/movements${queryString}`);
+};
+
+export const recordEggAdjustment = async (adjustmentData) => {
+  return request("/eggs/adjust", {
+    method: "POST",
+    body: JSON.stringify(adjustmentData),
+  });
+};
+
+export const getEggSales = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, val]) => {
+    if (val !== undefined && val !== null && val !== "") {
+      queryParams.append(key, val);
+    }
+  });
+  const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  return request(`/eggs/sales${queryString}`);
+};
+
+export const getEggSaleById = async (id) => {
+  return request(`/eggs/sales/${id}`);
+};
+
+export const createEggSale = async (data) => {
+  return request("/eggs/sales", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+};
+
+export const updateEggSale = async (id, data) => {
+  return request(`/eggs/sales/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+};
+
+export const deleteEggSale = async (id) => {
+  return request(`/eggs/sales/${id}`, {
     method: "DELETE",
   });
 };

@@ -456,9 +456,35 @@ function DepopulationPage() {
                         </td>
                         <td>
                           {evt.income ? (
-                            <span style={{ fontSize: 12, color: "var(--color-primary)", fontWeight: 600 }}>
-                              💰 Income: {evt.income.amount} GMD ({evt.income.category})
-                            </span>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--color-primary)" }}>
+                                  💰 {Number(evt.income.amount).toLocaleString()} GMD
+                                </span>
+                                <span
+                                  className={`badge ${
+                                    evt.income.paymentStatus === "PAID"
+                                      ? "badge-completed"
+                                      : evt.income.paymentStatus === "PARTIALLY_PAID"
+                                      ? "badge-due-soon"
+                                      : "badge-overdue"
+                                  }`}
+                                  style={{ fontSize: 10, padding: "2px 6px" }}
+                                >
+                                  {evt.income.paymentStatus || "PAID"}
+                                </span>
+                              </div>
+                              {evt.income.customer?.name && (
+                                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                                  Buyer: <strong>{evt.income.customer.name}</strong>
+                                </span>
+                              )}
+                              {Number(evt.income.amountDue || 0) > 0 && (
+                                <span style={{ fontSize: 11, color: "var(--alert-danger)" }}>
+                                  Due: {Number(evt.income.amountDue).toLocaleString()} GMD
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             <span style={{ fontSize: 11, color: "var(--text-muted)" }}>—</span>
                           )}

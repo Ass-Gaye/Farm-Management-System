@@ -20,8 +20,10 @@ import FinancePage from "./pages/FinancePage";
 import InventoryPage from "./pages/InventoryPage";
 import FlocksPage from "./pages/FlocksPage";
 import FlockFormPage from "./pages/FlockFormPage";
+import FlockDetailPage from "./pages/FlockDetailPage";
 import VaccinationsPage from "./pages/VaccinationsPage";
 import DepopulationPage from "./pages/DepopulationPage";
+import EggsPage from "./pages/EggsPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 import "./App.css";
@@ -68,6 +70,7 @@ function AppContent() {
         {/* 2. Flocks / Batches */}
         <Route path="/flocks" element={<FlocksPage />} />
         <Route path="/flocks/new" element={<FlockFormPage />} />
+        <Route path="/flocks/:id" element={<FlockDetailPage />} />
         <Route path="/flocks/:id/edit" element={<FlockFormPage />} />
         <Route path="/depopulation" element={<DepopulationPage />} />
         <Route path="/depopulation-events" element={<DepopulationPage />} />
@@ -98,6 +101,9 @@ function AppContent() {
         {/* 8. Inventory & Feed Management */}
         <Route path="/inventory" element={<InventoryPage />} />
 
+        {/* 8b. Egg Inventory & Sales */}
+        <Route path="/eggs" element={<EggsPage />} />
+
         {/* 9. Financial Management */}
         <Route path="/finances" element={<FinancePage />} />
 
@@ -110,6 +116,7 @@ function AppContent() {
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="flocks" element={<FlocksPage />} />
+          <Route path="flocks/:id" element={<FlockDetailPage />} />
           <Route path="depopulation" element={<DepopulationPage />} />
           <Route path="depopulation-events" element={<DepopulationPage />} />
           <Route path="daily-records" element={<DailyRecordsPage />} />
@@ -118,6 +125,7 @@ function AppContent() {
           <Route path="health-condition" element={<HealthConditionPage />} />
           <Route path="slaughter-planning" element={<SlaughterPlanningPage />} />
           <Route path="inventory" element={<InventoryPage />} />
+          <Route path="eggs" element={<EggsPage />} />
           <Route path="finances" element={<FinancePage />} />
         </Route>
 
